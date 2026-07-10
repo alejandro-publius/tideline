@@ -16,6 +16,11 @@ class NoaaError(Exception):
     """The NOAA API was unreachable or returned an error payload."""
 
 
+# NOAA reports "no sensor for this product here" as an error payload, but for
+# our purposes it's a valid, empty answer — not an upstream failure.
+NO_DATA_MARKER = "No data was found"
+
+
 class NoaaClient:
     def __init__(self, base_url: str, timeout: float = 15.0) -> None:
         self.base_url = base_url
@@ -44,7 +49,10 @@ class NoaaClient:
             raise NoaaError(f"NOAA request failed: {exc}") from exc
 
         if "error" in payload:
-            raise NoaaError(payload["error"].get("message", "unknown NOAA error").strip())
+            message = payload["error"].get("message", "unknown NOAA error").strip()
+            if NO_DATA_MARKER in message:
+                return []
+            raise NoaaError(message)
 
         # Observed products return rows under "data", predictions under "predictions"
         rows = payload.get("data") or payload.get("predictions") or []

@@ -97,6 +97,21 @@ def test_502_when_noaa_down_and_nothing_cached(client):
     assert resp.status_code == 502
 
 
+@respx.mock
+def test_station_without_sensor_returns_empty_series_and_caches_it(client):
+    """A missing sensor must be a 200 with no readings, and must not re-poll NOAA."""
+    payload = {"error": {"message": "No data was found. Product not offered at this station."}}
+    route = respx.get(NOAA_URL).mock(return_value=Response(200, json=payload))
+
+    first = client.get(READINGS_URL + "?product=water_temperature")
+    second = client.get(READINGS_URL + "?product=water_temperature")
+
+    assert first.status_code == 200
+    assert first.json()["readings"] == []
+    assert second.json()["source"] == "cache"
+    assert route.call_count == 1, "empty answers must be cached, not retried per request"
+
+
 def test_unknown_station_returns_404(client):
     resp = client.get("/api/stations/0000000/readings")
 
