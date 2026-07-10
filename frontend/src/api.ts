@@ -36,6 +36,6 @@ export const fetchReadings = (
   signal?: AbortSignal,
 ) => getJson<Series>(`/api/stations/${stationId}/readings?product=${product}&hours=${hours}`, signal)
 
-// Predictions max out at 48h each direction on the backend
+// Lookback follows the selected range; the backend caps lookahead at 48h
 export const fetchPredictions = (stationId: string, hours: number, signal?: AbortSignal) =>
-  getJson<Series>(`/api/stations/${stationId}/predictions?hours=${Math.min(hours, 48)}`, signal)
+  getJson<Series>(`/api/stations/${stationId}/predictions?hours=${hours}`, signal)
