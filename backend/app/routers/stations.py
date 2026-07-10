@@ -65,7 +65,9 @@ def get_predictions(
     station = _get_station(db, station_id)
     now = utcnow()
     ahead = timedelta(hours=min(hours, PREDICTIONS_LOOKAHEAD_HOURS))
-    return _series_response(db, client, station, "predictions", now - timedelta(hours=hours), now + ahead)
+    return _series_response(
+        db, client, station, "predictions", now - timedelta(hours=hours), now + ahead
+    )
 
 
 def _series_response(db, client, station, product, begin, end) -> SeriesOut:

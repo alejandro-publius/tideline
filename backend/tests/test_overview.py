@@ -58,7 +58,9 @@ def test_overview_is_cached_within_ttl(client):
 @respx.mock
 def test_overview_survives_a_failing_station(client):
     route = respx.get(NOAA_URL).mock(
-        side_effect=_responder(water_level_payload(), predictions_payload(), failing_station="9414290")
+        side_effect=_responder(
+            water_level_payload(), predictions_payload(), failing_station="9414290"
+        )
     )
 
     resp = client.get("/api/overview")
