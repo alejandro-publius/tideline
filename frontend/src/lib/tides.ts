@@ -24,6 +24,10 @@ export function mergeSeries(observed: Reading[], predicted: Reading[]): TidePoin
   return [...byTime.values()].sort((a, b) => a.t - b.t)
 }
 
+/** |surge| beyond this (in meters) is colored as anomalous on the map.
+ * Chosen empirically: calm-day residuals at these stations sit within ±0.1 m. */
+export const SURGE_THRESHOLD = 0.15
+
 export interface SurgeReading {
   t: number
   observed: number

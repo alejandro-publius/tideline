@@ -1,4 +1,4 @@
-import type { Product, Series, Station } from './types'
+import type { Product, Series, Station, StationOverview } from './types'
 
 // Same-origin in production (the backend serves the built frontend);
 // the Vite dev server proxies /api instead.
@@ -28,6 +28,9 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const fetchStations = (signal?: AbortSignal) => getJson<Station[]>('/api/stations', signal)
+
+export const fetchOverview = (signal?: AbortSignal) =>
+  getJson<{ stations: StationOverview[] }>('/api/overview', signal)
 
 export const fetchReadings = (
   stationId: string,

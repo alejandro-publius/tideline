@@ -22,3 +22,11 @@ export interface Series {
   fetched_at: string | null
   readings: Reading[]
 }
+
+export interface StationOverview {
+  station: Station
+  ts: string | null
+  observed: number | null
+  predicted: number | null
+  surge: number | null
+}

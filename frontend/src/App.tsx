@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchPredictions, fetchReadings, fetchStations } from './api'
+import { fetchOverview, fetchPredictions, fetchReadings, fetchStations } from './api'
 import Controls from './components/Controls'
 import ReadingsChart from './components/ReadingsChart'
 import SourceBadge from './components/SourceBadge'
@@ -7,7 +7,7 @@ import StationMap from './components/StationMap'
 import StatTiles from './components/StatTiles'
 import { mergeSeries } from './lib/tides'
 import { DEFAULT_STATION, readUrlState, writeUrlState } from './lib/urlState'
-import type { Product, Series, Station } from './types'
+import type { Product, Series, Station, StationOverview } from './types'
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
 
@@ -18,6 +18,7 @@ const initialState = readUrlState(window.location.search)
 export default function App() {
   const [stations, setStations] = useState<Station[]>([])
   const [stationsError, setStationsError] = useState<string | null>(null)
+  const [overview, setOverview] = useState<StationOverview[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(initialState.station)
   const [product, setProduct] = useState<Product>(initialState.product)
   const [hours, setHours] = useState(initialState.hours)
@@ -72,6 +73,17 @@ export default function App() {
     window.history.replaceState(null, '', `${window.location.pathname}${qs}`)
   }, [selectedId, product, hours])
 
+  // surge overview colors the map; slower than /stations, so it loads separately
+  useEffect(() => {
+    const ctrl = new AbortController()
+    fetchOverview(ctrl.signal)
+      .then((data) => setOverview(data.stations))
+      .catch(() => {
+        // map falls back to uncolored markers; not worth an error state
+      })
+    return () => ctrl.abort()
+  }, [refreshTick])
+
   // keep a visible dashboard live; hidden tabs don't poll
   useEffect(() => {
     const id = setInterval(() => {
@@ -86,6 +98,10 @@ export default function App() {
   )
   const nowMs = useMemo(() => Date.now(), [observed]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedStation = stations.find((s) => s.id === selectedId)
+  const surgeById = useMemo(
+    () => Object.fromEntries(overview.map((row) => [row.station.id, row.surge])),
+    [overview],
+  )
 
   const emptyMessage =
     product === 'water_temperature'
@@ -106,7 +122,12 @@ export default function App() {
       <main className="layout">
         <section className="card map-card" aria-label="Station map">
           {stations.length > 0 ? (
-            <StationMap stations={stations} selectedId={selectedId} onSelect={setSelectedId} />
+            <StationMap
+              stations={stations}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              surgeById={surgeById}
+            />
           ) : (
             <p className="placeholder">{stationsError ?? 'Loading stations…'}</p>
           )}
