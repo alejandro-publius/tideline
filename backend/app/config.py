@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     noaa_base_url: str = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
     cache_ttl_minutes: int = 10
     predictions_ttl_minutes: int = 12 * 60
+    # background sweep that keeps surge history accumulating without visitors
+    # (0 disables it)
+    history_refresh_minutes: int = 30
     cors_origins: str = "http://localhost:5173"
     static_dir: str = ""
 

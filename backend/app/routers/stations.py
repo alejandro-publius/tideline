@@ -2,14 +2,14 @@ from datetime import timedelta
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, aliased
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import Station
+from ..models import Reading, Station
 from ..noaa import NoaaClient
-from ..schemas import SeriesOut, StationOut
+from ..schemas import DailySurgeOut, SeriesOut, StationOut
 from ..service import PREDICTIONS_LOOKAHEAD_HOURS, UpstreamUnavailable, get_series, utcnow
 
 router = APIRouter(prefix="/api/stations", tags=["stations"])
@@ -68,6 +68,55 @@ def get_predictions(
     return _series_response(
         db, client, station, "predictions", now - timedelta(hours=hours), now + ahead
     )
+
+
+@router.get("/{station_id}/history", response_model=list[DailySurgeOut])
+def get_history(
+    station_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+) -> list[DailySurgeOut]:
+    """Daily surge statistics from accumulated history.
+
+    Serves whatever the database has collected (via requests and the
+    background sweep) — no NOAA calls. Observations are paired with the
+    prediction at the same timestamp, then aggregated per UTC day.
+    """
+    station = _get_station(db, station_id)
+    observed, predicted = aliased(Reading), aliased(Reading)
+    day = func.date(observed.ts)
+    surge = observed.value - predicted.value
+    rows = db.execute(
+        select(
+            day.label("day"),
+            func.avg(surge).label("avg_surge"),
+            func.max(surge).label("max_surge"),
+            func.count().label("samples"),
+        )
+        .select_from(observed)
+        .join(
+            predicted,
+            (predicted.station_id == observed.station_id)
+            & (predicted.ts == observed.ts)
+            & (predicted.product == "predictions"),
+        )
+        .where(
+            observed.station_id == station.id,
+            observed.product == "water_level",
+            observed.ts >= utcnow() - timedelta(days=days),
+        )
+        .group_by(day)
+        .order_by(day)
+    ).all()
+    return [
+        DailySurgeOut(
+            day=row.day,
+            avg_surge=round(row.avg_surge, 3),
+            max_surge=round(row.max_surge, 3),
+            samples=row.samples,
+        )
+        for row in rows
+    ]
 
 
 def _series_response(db, client, station, product, begin, end) -> SeriesOut:
