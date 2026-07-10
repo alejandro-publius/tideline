@@ -22,6 +22,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initialState.station)
   const [product, setProduct] = useState<Product>(initialState.product)
   const [hours, setHours] = useState(initialState.hours)
+  const [units, setUnits] = useState(initialState.units)
   const [refreshTick, setRefreshTick] = useState(0)
 
   const [observed, setObserved] = useState<Series | null>(null)
@@ -69,9 +70,9 @@ export default function App() {
   // shareable URLs: reflect the current view without spamming history
   useEffect(() => {
     if (!selectedId) return
-    const qs = writeUrlState({ station: selectedId, product, hours })
+    const qs = writeUrlState({ station: selectedId, product, hours, units })
     window.history.replaceState(null, '', `${window.location.pathname}${qs}`)
-  }, [selectedId, product, hours])
+  }, [selectedId, product, hours, units])
 
   // surge overview colors the map; slower than /stations, so it loads separately
   useEffect(() => {
@@ -127,6 +128,7 @@ export default function App() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               surgeById={surgeById}
+              units={units}
             />
           ) : (
             <p className="placeholder">{stationsError ?? 'Loading stations…'}</p>
@@ -169,6 +171,8 @@ export default function App() {
                 onProduct={setProduct}
                 hours={hours}
                 onHours={setHours}
+                units={units}
+                onUnits={setUnits}
               />
             </div>
           </div>
@@ -189,10 +193,11 @@ export default function App() {
                 predicted={predicted?.readings ?? []}
                 product={product}
                 nowMs={nowMs}
+                units={units}
               />
               <div className={`card chart-card${loading ? ' is-loading' : ''}`}>
                 {points.length > 0 ? (
-                  <ReadingsChart points={points} product={product} nowMs={nowMs} />
+                  <ReadingsChart points={points} product={product} nowMs={nowMs} units={units} />
                 ) : (
                   <p className="placeholder">{loading ? 'Loading readings…' : emptyMessage}</p>
                 )}

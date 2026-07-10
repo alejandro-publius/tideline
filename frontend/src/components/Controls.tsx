@@ -1,3 +1,4 @@
+import type { Units } from '../lib/tides'
 import type { Product } from '../types'
 
 const PRODUCTS: { value: Product; label: string }[] = [
@@ -7,14 +8,21 @@ const PRODUCTS: { value: Product; label: string }[] = [
 
 const RANGES = [12, 24, 48, 72]
 
+const UNITS: { value: Units; label: string }[] = [
+  { value: 'metric', label: 'm · °C' },
+  { value: 'us', label: 'ft · °F' },
+]
+
 interface Props {
   product: Product
   onProduct: (p: Product) => void
   hours: number
   onHours: (h: number) => void
+  units: Units
+  onUnits: (u: Units) => void
 }
 
-export default function Controls({ product, onProduct, hours, onHours }: Props) {
+export default function Controls({ product, onProduct, hours, onHours, units, onUnits }: Props) {
   return (
     <div className="controls">
       <div className="seg" role="group" aria-label="Data product">
@@ -33,6 +41,18 @@ export default function Controls({ product, onProduct, hours, onHours }: Props) 
         {RANGES.map((h) => (
           <button key={h} type="button" aria-pressed={hours === h} onClick={() => onHours(h)}>
             {h}h
+          </button>
+        ))}
+      </div>
+      <div className="seg" role="group" aria-label="Units">
+        {UNITS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={units === value}
+            onClick={() => onUnits(value)}
+          >
+            {label}
           </button>
         ))}
       </div>

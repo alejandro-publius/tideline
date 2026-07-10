@@ -98,5 +98,21 @@ export function fmtDuration(ms: number): string {
 
 export const fmtTime = (ms: number) => timeFmt.format(new Date(ms))
 export const fmtDayTime = (ms: number) => dayTimeFmt.format(new Date(ms))
-export const fmtMeters = (v: number) => `${v.toFixed(2)} m`
-export const fmtCelsius = (v: number) => `${v.toFixed(1)} °C`
+
+/* Data is metric everywhere internally (NOAA is queried in metric);
+ * units apply only at the display boundary. */
+export type Units = 'metric' | 'us'
+
+const M_TO_FT = 3.28084
+
+export const levelValue = (meters: number, units: Units) =>
+  units === 'us' ? meters * M_TO_FT : meters
+
+export const fmtLevel = (meters: number, units: Units, decimals = 2) =>
+  `${levelValue(meters, units).toFixed(decimals)} ${units === 'us' ? 'ft' : 'm'}`
+
+export const tempValue = (celsius: number, units: Units) =>
+  units === 'us' ? (celsius * 9) / 5 + 32 : celsius
+
+export const fmtTemp = (celsius: number, units: Units) =>
+  `${tempValue(celsius, units).toFixed(1)} ${units === 'us' ? '°F' : '°C'}`

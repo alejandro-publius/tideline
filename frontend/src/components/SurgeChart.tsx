@@ -1,5 +1,5 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { fmtDayTime, type TidePoint } from '../lib/tides'
+import { fmtDayTime, fmtLevel, levelValue, type TidePoint, type Units } from '../lib/tides'
 import { useChartTheme, type ChartTheme } from '../theme'
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   domain: [number, number]
   nowMs: number
   syncId: string
+  units: Units
 }
 
 interface SurgePoint {
@@ -19,11 +20,13 @@ function SurgeTooltip({
   payload,
   label,
   theme,
+  units,
 }: {
   active?: boolean
   payload?: { value?: number }[]
   label?: number
   theme: ChartTheme
+  units: Units
 }) {
   if (!active || !payload?.length || label === undefined) return null
   const value = payload[0].value ?? 0
@@ -38,7 +41,7 @@ function SurgeTooltip({
         <span className="chart-tooltip-name">Surge</span>
         <span className="chart-tooltip-value">
           {value >= 0 ? '+' : '−'}
-          {Math.abs(value).toFixed(2)} m
+          {fmtLevel(Math.abs(value), units)}
         </span>
       </div>
     </div>
@@ -46,7 +49,7 @@ function SurgeTooltip({
 }
 
 /** Small diverging chart of observed − predicted, axis-aligned with the main chart. */
-export default function SurgeChart({ points, domain, nowMs, syncId }: Props) {
+export default function SurgeChart({ points, domain, nowMs, syncId, units }: Props) {
   const theme = useChartTheme()
   const surgePoints: SurgePoint[] = points
     .filter((p) => p.observed !== undefined && p.predicted !== undefined)
@@ -90,14 +93,14 @@ export default function SurgeChart({ points, domain, nowMs, syncId }: Props) {
           <YAxis
             domain={[-maxAbs * 1.25, maxAbs * 1.25]}
             ticks={[-maxAbs, 0, maxAbs]}
-            tickFormatter={(v: number) => v.toFixed(2)}
+            tickFormatter={(v: number) => levelValue(v, units).toFixed(2)}
             tick={{ fill: theme.muted, fontSize: 11 }}
             tickLine={false}
             axisLine={false}
             width={40}
           />
           <Tooltip
-            content={<SurgeTooltip theme={theme} />}
+            content={<SurgeTooltip theme={theme} units={units} />}
             cursor={{ stroke: theme.baseline, strokeDasharray: '4 4' }}
             isAnimationActive={false}
           />

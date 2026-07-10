@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Reading } from '../types'
-import { fmtDuration, hourTicks, latestSurge, mergeSeries, nextExtreme } from './tides'
+import {
+  fmtDuration,
+  fmtLevel,
+  fmtTemp,
+  hourTicks,
+  latestSurge,
+  mergeSeries,
+  nextExtreme,
+} from './tides'
 
 const HOUR = 3600_000
 
@@ -111,6 +119,20 @@ describe('hourTicks', () => {
       expect(tick).toBeGreaterThanOrEqual(start)
       expect(tick).toBeLessThanOrEqual(end)
     }
+  })
+})
+
+describe('unit conversion', () => {
+  it('formats levels in meters or feet', () => {
+    expect(fmtLevel(1, 'metric')).toBe('1.00 m')
+    expect(fmtLevel(1, 'us')).toBe('3.28 ft')
+    expect(fmtLevel(-0.35, 'us')).toBe('-1.15 ft')
+  })
+
+  it('formats temperatures in °C or °F', () => {
+    expect(fmtTemp(20, 'metric')).toBe('20.0 °C')
+    expect(fmtTemp(20, 'us')).toBe('68.0 °F')
+    expect(fmtTemp(0, 'us')).toBe('32.0 °F')
   })
 })
 

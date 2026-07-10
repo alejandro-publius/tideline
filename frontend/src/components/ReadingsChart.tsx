@@ -8,7 +8,17 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { fmtDayTime, fmtTime, hourTicks, type TidePoint } from '../lib/tides'
+import {
+  fmtDayTime,
+  fmtLevel,
+  fmtTemp,
+  fmtTime,
+  hourTicks,
+  levelValue,
+  tempValue,
+  type TidePoint,
+  type Units,
+} from '../lib/tides'
 import { useChartTheme } from '../theme'
 import type { Product } from '../types'
 import SurgeChart from './SurgeChart'
@@ -19,6 +29,7 @@ interface Props {
   points: TidePoint[]
   product: Product
   nowMs: number
+  units: Units
 }
 
 interface TooltipEntry {
@@ -31,12 +42,12 @@ function ChartTooltip({
   active,
   payload,
   label,
-  unit,
+  format,
 }: {
   active?: boolean
   payload?: TooltipEntry[]
   label?: number
-  unit: string
+  format: (value: number) => string
 }) {
   if (!active || !payload?.length || label === undefined) return null
   return (
@@ -47,7 +58,7 @@ function ChartTooltip({
           <span className="legend-swatch" style={{ background: entry.color }} />
           <span className="chart-tooltip-name">{entry.name}</span>
           <span className="chart-tooltip-value">
-            {entry.value?.toFixed(2)} {unit}
+            {entry.value !== undefined ? format(entry.value) : '—'}
           </span>
         </div>
       ))}
@@ -55,10 +66,12 @@ function ChartTooltip({
   )
 }
 
-export default function ReadingsChart({ points, product, nowMs }: Props) {
+export default function ReadingsChart({ points, product, nowMs, units }: Props) {
   const theme = useChartTheme()
   const hasPredicted = points.some((p) => p.predicted !== undefined)
-  const unit = product === 'water_level' ? 'm' : '°C'
+  const isLevel = product === 'water_level'
+  const fmtValue = (v: number) => (isLevel ? fmtLevel(v, units) : fmtTemp(v, units))
+  const axisValue = (v: number) => (isLevel ? levelValue(v, units) : tempValue(v, units))
   const spansDays = points.length > 1 && points[points.length - 1].t - points[0].t > 24 * 3600_000
   const tickFmt = spansDays ? fmtDayTime : fmtTime
   const ticks =
@@ -100,7 +113,7 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
           />
           <YAxis
             domain={['auto', 'auto']}
-            tickFormatter={(v: number) => v.toFixed(1)}
+            tickFormatter={(v: number) => axisValue(v).toFixed(1)}
             tick={{ fill: theme.muted, fontSize: 11 }}
             tickLine={false}
             axisLine={false}
@@ -108,7 +121,7 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
             unit=""
           />
           <Tooltip
-            content={<ChartTooltip unit={unit} />}
+            content={<ChartTooltip format={fmtValue} />}
             cursor={{ stroke: theme.baseline, strokeDasharray: '4 4' }}
             isAnimationActive={false}
           />
@@ -146,7 +159,7 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
         </LineChart>
       </ResponsiveContainer>
       {hasPredicted && (
-        <SurgeChart points={points} domain={domain} nowMs={nowMs} syncId={SYNC_ID} />
+        <SurgeChart points={points} domain={domain} nowMs={nowMs} syncId={SYNC_ID} units={units} />
       )}
     </div>
   )

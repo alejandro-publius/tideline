@@ -1,7 +1,7 @@
 import { latLng, latLngBounds } from 'leaflet'
 import { useEffect } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
-import { SURGE_THRESHOLD } from '../lib/tides'
+import { fmtLevel, SURGE_THRESHOLD, type Units } from '../lib/tides'
 import { useChartTheme, type ChartTheme } from '../theme'
 import type { Station } from '../types'
 
@@ -11,6 +11,7 @@ interface Props {
   onSelect: (id: string) => void
   /** latest surge per station id; undefined key or null value = unknown */
   surgeById: Record<string, number | null>
+  units: Units
 }
 
 /** Leaflet only tracks window resizes; when the layout itself grows (e.g. the
@@ -48,10 +49,9 @@ function markerColor(surge: number | null | undefined, theme: ChartTheme): strin
   return theme.muted
 }
 
-const fmtSurge = (surge: number) =>
-  `${surge >= 0 ? '+' : '−'}${Math.abs(surge).toFixed(2)} m`
-
-export default function StationMap({ stations, selectedId, onSelect, surgeById }: Props) {
+export default function StationMap({ stations, selectedId, onSelect, surgeById, units }: Props) {
+  const fmtSurge = (surge: number) => `${surge >= 0 ? '+' : '−'}${fmtLevel(Math.abs(surge), units)}`
+  const threshold = fmtLevel(SURGE_THRESHOLD, units)
   const theme = useChartTheme()
   const bounds = latLngBounds(stations.map((s) => [s.lat, s.lon] as [number, number])).pad(0.12)
 
@@ -92,12 +92,10 @@ export default function StationMap({ stations, selectedId, onSelect, surgeById }
       </MapContainer>
       <div className="map-legend" aria-label="Surge legend">
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: theme.surgeAbove }} /> ≥ +
-          {SURGE_THRESHOLD} m
+          <span className="legend-dot" style={{ background: theme.surgeAbove }} /> ≥ +{threshold}
         </span>
         <span className="legend-item">
-          <span className="legend-dot" style={{ background: theme.surgeBelow }} /> ≤ −
-          {SURGE_THRESHOLD} m
+          <span className="legend-dot" style={{ background: theme.surgeBelow }} /> ≤ −{threshold}
         </span>
         <span className="legend-item">
           <span className="legend-dot" style={{ background: theme.muted }} /> near zero

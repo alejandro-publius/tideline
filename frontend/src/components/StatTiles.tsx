@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
 import {
-  fmtCelsius,
   fmtDuration,
-  fmtMeters,
+  fmtLevel,
+  fmtTemp,
   fmtTime,
   latestSurge,
   nextExtreme,
   type TidePoint,
+  type Units,
 } from '../lib/tides'
 import type { Product, Reading } from '../types'
 
@@ -15,6 +16,7 @@ interface Props {
   predicted: Reading[]
   product: Product
   nowMs: number
+  units: Units
 }
 
 interface Tile {
@@ -23,15 +25,15 @@ interface Tile {
   sub?: string
 }
 
-export default function StatTiles({ points, predicted, product, nowMs }: Props) {
+export default function StatTiles({ points, predicted, product, nowMs, units }: Props) {
   const tiles = useMemo<Tile[]>(() => {
     if (product === 'water_temperature') {
       const temps = points.filter((p) => p.observed !== undefined).map((p) => p.observed as number)
       if (temps.length === 0) return []
       return [
-        { label: 'Current', value: fmtCelsius(temps[temps.length - 1]) },
-        { label: 'Window low', value: fmtCelsius(Math.min(...temps)) },
-        { label: 'Window high', value: fmtCelsius(Math.max(...temps)) },
+        { label: 'Current', value: fmtTemp(temps[temps.length - 1], units) },
+        { label: 'Window low', value: fmtTemp(Math.min(...temps), units) },
+        { label: 'Window high', value: fmtTemp(Math.max(...temps), units) },
       ]
     }
 
@@ -40,22 +42,22 @@ export default function StatTiles({ points, predicted, product, nowMs }: Props) 
     if (!surge) return []
     const sign = surge.surge >= 0 ? '+' : '−'
     return [
-      { label: 'Observed', value: fmtMeters(surge.observed), sub: fmtTime(surge.t) },
-      { label: 'Predicted', value: fmtMeters(surge.predicted), sub: 'astronomical tide' },
+      { label: 'Observed', value: fmtLevel(surge.observed, units), sub: fmtTime(surge.t) },
+      { label: 'Predicted', value: fmtLevel(surge.predicted, units), sub: 'astronomical tide' },
       {
         label: 'Surge residual',
-        value: `${sign}${fmtMeters(Math.abs(surge.surge))}`,
+        value: `${sign}${fmtLevel(Math.abs(surge.surge), units)}`,
         sub: surge.surge >= 0 ? 'above prediction' : 'below prediction',
       },
       extreme
         ? {
             label: `Next ${extreme.kind} tide`,
             value: fmtTime(extreme.t),
-            sub: `${fmtDuration(extreme.t - nowMs)} · ${fmtMeters(extreme.value)}`,
+            sub: `${fmtDuration(extreme.t - nowMs)} · ${fmtLevel(extreme.value, units)}`,
           }
         : { label: 'Next tide', value: '—' },
     ]
-  }, [points, predicted, product, nowMs])
+  }, [points, predicted, product, nowMs, units])
 
   if (tiles.length === 0) return null
   return (
