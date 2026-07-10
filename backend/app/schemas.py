@@ -30,6 +30,24 @@ class ReadingOut(BaseModel):
         return _iso_utc(ts)
 
 
+class StationOverviewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    station: StationOut
+    ts: datetime | None
+    observed: float | None
+    predicted: float | None
+    surge: float | None
+
+    @field_serializer("ts")
+    def serialize_ts(self, ts: datetime | None) -> str | None:
+        return _iso_utc(ts) if ts else None
+
+
+class OverviewOut(BaseModel):
+    stations: list[StationOverviewOut]
+
+
 class SeriesOut(BaseModel):
     station_id: str
     product: str

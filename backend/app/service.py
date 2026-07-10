@@ -7,6 +7,7 @@ range) so a narrow request can't mark a wide range as fresh. When NOAA is
 unreachable, previously cached data is served with source="stale".
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -115,6 +116,95 @@ def _store(
         if ts not in existing
     )
     db.commit()
+
+
+OVERVIEW_PRODUCTS = ("water_level", "predictions")
+
+
+@dataclass
+class StationOverview:
+    station: Station
+    ts: datetime | None
+    observed: float | None
+    predicted: float | None
+    surge: float | None
+
+
+def _refresh_stale_series(
+    db: Session,
+    client: NoaaClient,
+    stations: list[Station],
+    products: tuple[str, ...],
+    max_workers: int = 6,
+) -> None:
+    """Bring every (station, product) up to date in one sweep.
+
+    NOAA requests run in parallel threads (pure I/O, no DB access);
+    SQLite writes stay on the calling thread. Stations NOAA fails for
+    are simply skipped — an overview must not die on one bad station.
+    """
+    now = utcnow()
+    stale = [
+        (station, product)
+        for station in stations
+        for product in products
+        if (log := db.get(FetchLog, (station.id, product))) is None
+        or now - log.fetched_at >= _ttl_for(product)
+    ]
+    if not stale:
+        return
+
+    def fetch(pair: tuple[Station, str]):
+        station, product = pair
+        begin, end = _fetch_window(product, now)
+        try:
+            return station, product, client.fetch_series(station.id, product, begin, end)
+        except NoaaError:
+            return station, product, None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = list(pool.map(fetch, stale))
+
+    for station, product, series in results:
+        if series is None:
+            continue
+        _store(db, station.id, product, series)
+        _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
+
+
+def get_overview(db: Session, client: NoaaClient) -> list[StationOverview]:
+    """Latest observed level, prediction, and surge for every station."""
+    stations = list(db.scalars(select(Station).order_by(Station.name)))
+    _refresh_stale_series(db, client, stations, OVERVIEW_PRODUCTS)
+
+    horizon = utcnow() - timedelta(hours=2)
+    rows: list[StationOverview] = []
+    for station in stations:
+        row = StationOverview(station=station, ts=None, observed=None, predicted=None, surge=None)
+        observed = db.scalars(
+            select(Reading)
+            .where(
+                Reading.station_id == station.id,
+                Reading.product == "water_level",
+                Reading.ts >= horizon,
+            )
+            .order_by(Reading.ts.desc())
+            .limit(1)
+        ).first()
+        if observed is not None:
+            row.ts, row.observed = observed.ts, observed.value
+            predicted = db.scalars(
+                select(Reading).where(
+                    Reading.station_id == station.id,
+                    Reading.product == "predictions",
+                    Reading.ts == observed.ts,
+                )
+            ).first()
+            if predicted is not None:
+                row.predicted = predicted.value
+                row.surge = round(observed.value - predicted.value, 3)
+        rows.append(row)
+    return rows
 
 
 def _touch_log(

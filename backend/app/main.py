@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import Base, SessionLocal, engine
-from .routers import stations
+from .routers import overview, stations
 from .seed import seed_stations
 
 
@@ -35,6 +35,7 @@ if settings.cors_origins:
     )
 
 app.include_router(stations.router)
+app.include_router(overview.router)
 
 
 @app.get("/api/healthz")
