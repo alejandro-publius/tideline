@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: tideline
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/healthz
+    autoDeploy: true
