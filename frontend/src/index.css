@@ -281,6 +281,12 @@ a.panel-sub:hover {
   background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);
 }
 
+.surge-chart {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--grid);
+}
+
 /* Chart tooltip */
 .chart-tooltip {
   background: var(--surface-1);

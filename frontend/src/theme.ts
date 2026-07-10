@@ -8,6 +8,9 @@ import { useSyncExternalStore } from 'react'
 export interface ChartTheme {
   observed: string
   predicted: string
+  /** diverging pair for the surge residual: above / below prediction */
+  surgeAbove: string
+  surgeBelow: string
   grid: string
   baseline: string
   muted: string
@@ -17,6 +20,8 @@ export interface ChartTheme {
 export const LIGHT: ChartTheme = {
   observed: '#2a78d6',
   predicted: '#1baf7a',
+  surgeAbove: '#e34948',
+  surgeBelow: '#2a78d6',
   grid: '#e1e0d9',
   baseline: '#c3c2b7',
   muted: '#898781',
@@ -26,6 +31,8 @@ export const LIGHT: ChartTheme = {
 export const DARK: ChartTheme = {
   observed: '#3987e5',
   predicted: '#199e70',
+  surgeAbove: '#e66767',
+  surgeBelow: '#3987e5',
   grid: '#2c2c2a',
   baseline: '#383835',
   muted: '#898781',

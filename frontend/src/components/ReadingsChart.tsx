@@ -11,6 +11,9 @@ import {
 import { fmtDayTime, fmtTime, hourTicks, type TidePoint } from '../lib/tides'
 import { useChartTheme } from '../theme'
 import type { Product } from '../types'
+import SurgeChart from './SurgeChart'
+
+const SYNC_ID = 'tideline' // synchronizes the crosshair across main + surge charts
 
 interface Props {
   points: TidePoint[]
@@ -60,6 +63,8 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
   const tickFmt = spansDays ? fmtDayTime : fmtTime
   const ticks =
     points.length > 1 ? hourTicks(points[0].t, points[points.length - 1].t) : undefined
+  const domain: [number, number] =
+    points.length > 1 ? [points[0].t, points[points.length - 1].t] : [0, 1]
 
   return (
     <div className="chart">
@@ -81,12 +86,12 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
         )}
       </div>
       <ResponsiveContainer width="100%" height={320}>
-        <LineChart data={points} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+        <LineChart data={points} margin={{ top: 8, right: 16, bottom: 4, left: 0 }} syncId={SYNC_ID}>
           <CartesianGrid stroke={theme.grid} vertical={false} />
           <XAxis
             dataKey="t"
             type="number"
-            domain={['dataMin', 'dataMax']}
+            domain={domain}
             tickFormatter={tickFmt}
             tick={{ fill: theme.muted, fontSize: 11 }}
             tickLine={false}
@@ -140,6 +145,9 @@ export default function ReadingsChart({ points, product, nowMs }: Props) {
           )}
         </LineChart>
       </ResponsiveContainer>
+      {hasPredicted && (
+        <SurgeChart points={points} domain={domain} nowMs={nowMs} syncId={SYNC_ID} />
+      )}
     </div>
   )
 }
