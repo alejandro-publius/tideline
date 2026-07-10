@@ -1,0 +1,129 @@
+"""Read-through cache between the REST API and NOAA.
+
+Every refresh persists readings to the database, so history accumulates
+across pulls. Freshness is tracked per (station, product) in a fetch log.
+Refreshes always pull the full supported window (not just the requested
+range) so a narrow request can't mark a wide range as fresh. When NOAA is
+unreachable, previously cached data is served with source="stale".
+"""
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .config import get_settings
+from .models import FetchLog, Reading, Station
+from .noaa import NoaaClient, NoaaError
+
+# Widest range the API serves; refreshes always cover it in full.
+MAX_LOOKBACK_HOURS = 72
+PREDICTIONS_LOOKAHEAD_HOURS = 48
+
+
+class UpstreamUnavailable(Exception):
+    """NOAA failed and there is no cached data to fall back on."""
+
+
+@dataclass
+class SeriesResult:
+    source: str  # "noaa" (fresh pull) | "cache" (within TTL) | "stale" (NOAA down)
+    fetched_at: datetime | None
+    readings: list[Reading]
+
+
+def utcnow() -> datetime:
+    """Naive UTC now; all timestamps in the system are naive UTC."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _ttl_for(product: str) -> timedelta:
+    settings = get_settings()
+    if product == "predictions":  # astronomical tides don't change minute to minute
+        return timedelta(minutes=settings.predictions_ttl_minutes)
+    return timedelta(minutes=settings.cache_ttl_minutes)
+
+
+def _fetch_window(product: str, now: datetime) -> tuple[datetime, datetime]:
+    begin = now - timedelta(hours=MAX_LOOKBACK_HOURS)
+    if product == "predictions":
+        return begin, now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS)
+    return begin, now
+
+
+def get_series(
+    db: Session,
+    client: NoaaClient,
+    station: Station,
+    product: str,
+    begin: datetime,
+    end: datetime,
+) -> SeriesResult:
+    log = db.get(FetchLog, (station.id, product))
+    now = utcnow()
+    source = "cache"
+
+    if log is None or now - log.fetched_at >= _ttl_for(product):
+        try:
+            fetch_begin, fetch_end = _fetch_window(product, now)
+            series = client.fetch_series(station.id, product, fetch_begin, fetch_end)
+        except NoaaError as exc:
+            if log is None:
+                raise UpstreamUnavailable(str(exc)) from exc
+            source = "stale"
+        else:
+            _store(db, station.id, product, series)
+            log = _touch_log(db, log, station.id, product, now)
+            source = "noaa"
+
+    readings = db.scalars(
+        select(Reading)
+        .where(
+            Reading.station_id == station.id,
+            Reading.product == product,
+            Reading.ts >= begin,
+            Reading.ts <= end,
+        )
+        .order_by(Reading.ts)
+    ).all()
+    return SeriesResult(
+        source=source,
+        fetched_at=log.fetched_at if log else None,
+        readings=list(readings),
+    )
+
+
+def _store(
+    db: Session, station_id: str, product: str, series: list[tuple[datetime, float]]
+) -> None:
+    """Insert new rows, skipping timestamps already recorded (portable upsert)."""
+    if not series:
+        return
+    existing = set(
+        db.scalars(
+            select(Reading.ts).where(
+                Reading.station_id == station_id,
+                Reading.product == product,
+                Reading.ts.in_([ts for ts, _ in series]),
+            )
+        )
+    )
+    db.add_all(
+        Reading(station_id=station_id, product=product, ts=ts, value=value)
+        for ts, value in series
+        if ts not in existing
+    )
+    db.commit()
+
+
+def _touch_log(
+    db: Session, log: FetchLog | None, station_id: str, product: str, now: datetime
+) -> FetchLog:
+    if log is None:
+        log = FetchLog(station_id=station_id, product=product, fetched_at=now)
+        db.add(log)
+    else:
+        log.fetched_at = now
+    db.commit()
+    return log
