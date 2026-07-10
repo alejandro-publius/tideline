@@ -45,7 +45,9 @@ class NoaaClient:
             resp = httpx.get(self.base_url, params=params, timeout=self.timeout)
             resp.raise_for_status()
             payload = resp.json()
-        except httpx.HTTPError as exc:
+        # ValueError covers JSONDecodeError: a 200 with a non-JSON body (e.g. an
+        # HTML maintenance page) must degrade like any other NOAA failure
+        except (httpx.HTTPError, ValueError) as exc:
             raise NoaaError(f"NOAA request failed: {exc}") from exc
 
         if "error" in payload:

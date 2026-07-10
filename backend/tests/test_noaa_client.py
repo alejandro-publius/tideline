@@ -45,6 +45,15 @@ def test_no_data_error_is_an_empty_series_not_a_failure():
 
 
 @respx.mock
+def test_non_json_body_raises_noaa_error_not_a_crash():
+    """A 200 with an HTML maintenance page must degrade like any NOAA failure."""
+    respx.get(NOAA_URL).mock(return_value=Response(200, text="<html>scheduled maintenance</html>"))
+
+    with pytest.raises(NoaaError, match="NOAA request failed"):
+        NoaaClient(NOAA_URL).fetch_series("9414290", "water_level", BEGIN, END)
+
+
+@respx.mock
 def test_error_payload_raises_noaa_error():
     payload = {"error": {"message": " The station is not a valid station. "}}
     respx.get(NOAA_URL).mock(return_value=Response(200, json=payload))
