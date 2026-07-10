@@ -10,6 +10,19 @@ interface Props {
   onSelect: (id: string) => void
 }
 
+/** Leaflet only tracks window resizes; when the layout itself grows (e.g. the
+ * chart column gets taller and stretches the map card) it leaves an untiled
+ * dead zone. Watch the container and tell Leaflet about size changes. */
+function InvalidateOnResize() {
+  const map = useMap()
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 /** Pans/zooms to the selected station when it's outside the current view
  * (e.g. picked from the dropdown) — map clicks don't move the viewport. */
 function PanToSelection({ station }: { station: Station | undefined }) {
@@ -34,6 +47,7 @@ export default function StationMap({ stations, selectedId, onSelect }: Props) {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <InvalidateOnResize />
       <PanToSelection station={stations.find((s) => s.id === selectedId)} />
       {stations.map((station) => {
         const selected = station.id === selectedId
