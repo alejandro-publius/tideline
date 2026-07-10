@@ -17,12 +17,14 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 
 ## Features
 
-- **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker to switch stations
+- **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker or use the dropdown (the map pans to off-screen picks)
 - **Observed vs. predicted overlay chart** with a "now" marker, so you can see the upcoming tide as well as the last few days
-- **Surge residual** computed live: how far the water is above or below what the tide alone explains
-- **Next high/low tide** derived from the prediction series
-- **Read-through cache with graceful degradation** — repeated requests serve from SQLite; if NOAA is unreachable the API returns the last known data flagged `stale` instead of failing
-- Water temperature as a second data product, responsive layout, automatic dark mode
+- **Surge residual chart** — a diverging mini-chart of observed − predicted with a crosshair synced to the main chart; a rising residual is what a storm looks like
+- **Next high/low tide** with a live countdown, derived from the prediction series
+- **Shareable URLs** — station, product, and time range round-trip through the query string
+- **Read-through cache with graceful degradation** — repeated requests serve from SQLite; if NOAA is unreachable the API returns the last known data flagged `stale`, and the UI offers a retry
+- Stations without a sensor for a product (SF has no thermometer!) get a friendly empty state, not an error
+- Water temperature as a second data product, 5-minute auto-refresh, responsive layout, automatic dark mode
 
 ## Architecture
 
@@ -73,7 +75,7 @@ Series responses include `source` (`noaa` / `cache` / `stale`) and `fetched_at`,
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, httpx, pydantic-settings |
 | Database | SQLite (swap to Postgres by changing `TIDELINE_DATABASE_URL` — no dialect-specific SQL) |
 | Frontend | React 19, TypeScript, Vite, react-leaflet, Recharts |
-| Tests | pytest + respx (NOAA mocked at the HTTP transport layer) |
+| Tests | pytest + respx (NOAA mocked at the HTTP transport layer); Vitest for frontend logic |
 | CI/CD | GitHub Actions → Docker → Render |
 
 ## Running locally
@@ -98,11 +100,11 @@ npm run dev                          # http://localhost:5173, proxies /api to th
 ### Tests
 
 ```bash
-cd backend
-pytest -v
+cd backend && pytest -v      # 18 tests
+cd frontend && npm test      # 19 tests
 ```
 
-The suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (including sensor gaps), and request validation. NOAA is mocked with `respx`, so tests run offline in ~0.3 s.
+The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (including sensor gaps and no-sensor stations), gzip, and request validation — NOAA is mocked with `respx`, so tests run offline in ~0.3 s. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks) and URL state round-tripping.
 
 ## Docker
 
