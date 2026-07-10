@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 import pytest
@@ -13,14 +14,18 @@ from app.service import utcnow
 
 NOAA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 
+# Point at a real database (e.g. postgres in CI) to run the suite against it;
+# unset = fast in-memory SQLite.
+TEST_DATABASE_URL = os.environ.get("TIDELINE_TEST_DATABASE_URL", "")
 
-def water_level_payload(n: int = 10) -> dict:
+
+def water_level_payload(n: int = 10, base: float = 1.0) -> dict:
     """A NOAA water_level response with n readings, 6 minutes apart, ending now."""
     now = utcnow().replace(second=0, microsecond=0)
     rows = [
         {
             "t": (now - timedelta(minutes=6 * (n - 1 - i))).strftime("%Y-%m-%d %H:%M"),
-            "v": f"{1.0 + 0.01 * i:.3f}",
+            "v": f"{base + 0.01 * i:.3f}",
             "s": "0.050",
             "f": "0,0,0,0",
             "q": "p",
@@ -45,11 +50,15 @@ def predictions_payload(hours_back: int = 2, hours_ahead: int = 2) -> dict:
 
 @pytest.fixture()
 def session_factory():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if TEST_DATABASE_URL:
+        engine = create_engine(TEST_DATABASE_URL)
+        Base.metadata.drop_all(engine)  # clean slate when reusing a real database
+    else:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with factory() as db:

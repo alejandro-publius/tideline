@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_serializer
@@ -17,6 +17,10 @@ class StationOut(BaseModel):
     state: str
     lat: float
     lon: float
+    # NWS coastal flood thresholds, meters above MLLW
+    flood_minor: float | None
+    flood_moderate: float | None
+    flood_major: float | None
 
 
 class ReadingOut(BaseModel):
@@ -38,6 +42,7 @@ class StationOverviewOut(BaseModel):
     observed: float | None
     predicted: float | None
     surge: float | None
+    flood_stage: Literal["minor", "moderate", "major"] | None
 
     @field_serializer("ts")
     def serialize_ts(self, ts: datetime | None) -> str | None:
@@ -46,6 +51,15 @@ class StationOverviewOut(BaseModel):
 
 class OverviewOut(BaseModel):
     stations: list[StationOverviewOut]
+
+
+class DailySurgeOut(BaseModel):
+    """One day of surge residual statistics from accumulated history."""
+
+    day: date
+    avg_surge: float
+    max_surge: float
+    samples: int
 
 
 class SeriesOut(BaseModel):

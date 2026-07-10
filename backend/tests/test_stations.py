@@ -16,6 +16,9 @@ def test_list_stations_returns_seeded_stations(client):
         "state": "CA",
         "lat": 37.806305,
         "lon": -122.46589,
+        "flood_minor": 2.146,
+        "flood_moderate": 2.633,
+        "flood_major": 3.021,
     }
 
 

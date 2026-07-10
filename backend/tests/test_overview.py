@@ -56,6 +56,25 @@ def test_overview_is_cached_within_ttl(client):
 
 
 @respx.mock
+def test_overview_reports_nws_flood_stages(client):
+    """One elevated level classifies differently per station's NWS thresholds."""
+    # every station "observes" ~2.24 m: above SF minor (2.146), above Virginia
+    # Key major (1.442), below Seattle minor (4.103)
+    route = respx.get(NOAA_URL).mock(
+        side_effect=_responder(water_level_payload(base=2.15), predictions_payload())
+    )
+
+    resp = client.get("/api/overview")
+
+    assert resp.status_code == 200
+    assert route.call_count == EXPECTED_CALLS
+    stages = {row["station"]["id"]: row["flood_stage"] for row in resp.json()["stations"]}
+    assert stages["9414290"] == "minor"
+    assert stages["8723214"] == "major"
+    assert stages["9447130"] is None
+
+
+@respx.mock
 def test_overview_survives_a_failing_station(client):
     route = respx.get(NOAA_URL).mock(
         side_effect=_responder(

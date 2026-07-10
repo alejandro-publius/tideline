@@ -128,6 +128,21 @@ class StationOverview:
     observed: float | None
     predicted: float | None
     surge: float | None
+    flood_stage: str | None = None
+
+
+def flood_stage(level: float | None, station: Station) -> str | None:
+    """NWS flood stage for a water level, worst applicable stage first."""
+    if level is None:
+        return None
+    for stage, threshold in (
+        ("major", station.flood_major),
+        ("moderate", station.flood_moderate),
+        ("minor", station.flood_minor),
+    ):
+        if threshold is not None and level >= threshold:
+            return stage
+    return None
 
 
 def _refresh_stale_series(
@@ -193,6 +208,7 @@ def get_overview(db: Session, client: NoaaClient) -> list[StationOverview]:
         ).first()
         if observed is not None:
             row.ts, row.observed = observed.ts, observed.value
+            row.flood_stage = flood_stage(observed.value, station)
             predicted = db.scalars(
                 select(Reading).where(
                     Reading.station_id == station.id,

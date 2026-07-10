@@ -16,6 +16,10 @@ class Station(Base):
     state: Mapped[str] = mapped_column(String(2))
     lat: Mapped[float] = mapped_column(Float)
     lon: Mapped[float] = mapped_column(Float)
+    # NWS coastal flood thresholds in meters above MLLW (null = not defined)
+    flood_minor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    flood_moderate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    flood_major: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     readings: Mapped[list["Reading"]] = relationship(back_populates="station")
 

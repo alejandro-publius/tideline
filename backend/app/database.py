@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -12,9 +12,25 @@ class Base(DeclarativeBase):
 
 
 def make_engine(database_url: str) -> Engine:
-    # check_same_thread=False lets FastAPI's threadpool share the connection pool
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, connect_args=connect_args)
+    if database_url.startswith("sqlite"):
+        # check_same_thread=False lets FastAPI's threadpool share the connection pool
+        return create_engine(database_url, connect_args={"check_same_thread": False})
+    return create_engine(database_url, pool_pre_ping=True)
+
+
+def ensure_schema(engine: Engine) -> None:
+    """Additive mini-migration: add columns that create_all won't add to
+    pre-existing tables. Nullable-column ADDs are safe on SQLite and Postgres.
+    """
+    columns = {c["name"] for c in inspect(engine).get_columns("stations")}
+    missing = [
+        name for name in ("flood_minor", "flood_moderate", "flood_major") if name not in columns
+    ]
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for name in missing:
+            conn.execute(text(f"ALTER TABLE stations ADD COLUMN {name} FLOAT"))
 
 
 engine = make_engine(get_settings().database_url)
