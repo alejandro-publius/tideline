@@ -1,122 +1,132 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useMemo, useState } from 'react'
+import { fetchPredictions, fetchReadings, fetchStations } from './api'
+import Controls from './components/Controls'
+import ReadingsChart from './components/ReadingsChart'
+import SourceBadge from './components/SourceBadge'
+import StationMap from './components/StationMap'
+import StatTiles from './components/StatTiles'
+import { mergeSeries } from './lib/tides'
+import type { Product, Series, Station } from './types'
 
-function App() {
-  const [count, setCount] = useState(0)
+const DEFAULT_STATION = '9414290' // San Francisco
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Request failed')
+
+export default function App() {
+  const [stations, setStations] = useState<Station[]>([])
+  const [stationsError, setStationsError] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [product, setProduct] = useState<Product>('water_level')
+  const [hours, setHours] = useState(24)
+
+  const [observed, setObserved] = useState<Series | null>(null)
+  const [predicted, setPredicted] = useState<Series | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [seriesError, setSeriesError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    fetchStations(ctrl.signal)
+      .then((list) => {
+        setStations(list)
+        setSelectedId((current) => current ?? DEFAULT_STATION)
+      })
+      .catch((err) => {
+        if (!ctrl.signal.aborted) setStationsError(errorMessage(err))
+      })
+    return () => ctrl.abort()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedId) return
+    const ctrl = new AbortController()
+    setLoading(true)
+    setSeriesError(null)
+    const wantPredictions = product === 'water_level'
+    Promise.all([
+      fetchReadings(selectedId, product, hours, ctrl.signal),
+      wantPredictions ? fetchPredictions(selectedId, hours, ctrl.signal) : Promise.resolve(null),
+    ])
+      .then(([obs, pred]) => {
+        setObserved(obs)
+        setPredicted(pred)
+      })
+      .catch((err) => {
+        if (!ctrl.signal.aborted) setSeriesError(errorMessage(err))
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false)
+      })
+    return () => ctrl.abort()
+  }, [selectedId, product, hours])
+
+  const points = useMemo(
+    () => mergeSeries(observed?.readings ?? [], predicted?.readings ?? []),
+    [observed, predicted],
+  )
+  const nowMs = useMemo(() => Date.now(), [observed]) // eslint-disable-line react-hooks/exhaustive-deps
+  const selectedStation = stations.find((s) => s.id === selectedId)
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app">
+      <header className="app-header">
+        <img src="/wave.svg" alt="" width={30} height={30} />
+        <div className="app-title">
+          <h1>Tideline</h1>
+          <p>NOAA water levels vs. predicted tide</p>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+        <SourceBadge series={observed} />
+      </header>
 
-      <div className="ticks"></div>
+      <main className="layout">
+        <section className="card map-card" aria-label="Station map">
+          {stations.length > 0 ? (
+            <StationMap stations={stations} selectedId={selectedId} onSelect={setSelectedId} />
+          ) : (
+            <p className="placeholder">{stationsError ?? 'Loading stations…'}</p>
+          )}
+        </section>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>
+                {selectedStation ? `${selectedStation.name}, ${selectedStation.state}` : '—'}
+              </h2>
+              {selectedStation && <span className="panel-sub">Station {selectedStation.id}</span>}
+            </div>
+            <Controls product={product} onProduct={setProduct} hours={hours} onHours={setHours} />
+          </div>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+          {seriesError ? (
+            <div className="card error-card" role="alert">
+              <strong>Couldn’t load readings.</strong> {seriesError}
+            </div>
+          ) : (
+            <>
+              <StatTiles
+                points={points}
+                predicted={predicted?.readings ?? []}
+                product={product}
+                nowMs={nowMs}
+              />
+              <div className={`card chart-card${loading ? ' is-loading' : ''}`}>
+                {points.length > 0 ? (
+                  <ReadingsChart points={points} product={product} nowMs={nowMs} />
+                ) : (
+                  <p className="placeholder">{loading ? 'Loading readings…' : 'No data.'}</p>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+      </main>
+
+      <footer className="app-footer">
+        Data: <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a> · Map ©{' '}
+        <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Built
+        with FastAPI, React & SQLite
+      </footer>
+    </div>
   )
 }
-
-export default App
