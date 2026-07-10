@@ -1,5 +1,6 @@
-import { latLngBounds } from 'leaflet'
-import { CircleMarker, MapContainer, TileLayer, Tooltip } from 'react-leaflet'
+import { latLng, latLngBounds } from 'leaflet'
+import { useEffect } from 'react'
+import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { useChartTheme } from '../theme'
 import type { Station } from '../types'
 
@@ -7,6 +8,20 @@ interface Props {
   stations: Station[]
   selectedId: string | null
   onSelect: (id: string) => void
+}
+
+/** Pans/zooms to the selected station when it's outside the current view
+ * (e.g. picked from the dropdown) — map clicks don't move the viewport. */
+function PanToSelection({ station }: { station: Station | undefined }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!station) return
+    const target = latLng(station.lat, station.lon)
+    if (!map.getBounds().pad(-0.15).contains(target)) {
+      map.flyTo(target, Math.max(map.getZoom(), 6), { duration: 0.8 })
+    }
+  }, [map, station])
+  return null
 }
 
 export default function StationMap({ stations, selectedId, onSelect }: Props) {
@@ -19,6 +34,7 @@ export default function StationMap({ stations, selectedId, onSelect }: Props) {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <PanToSelection station={stations.find((s) => s.id === selectedId)} />
       {stations.map((station) => {
         const selected = station.id === selectedId
         return (

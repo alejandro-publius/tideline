@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import {
   fmtCelsius,
+  fmtDuration,
   fmtMeters,
   fmtTime,
   latestSurge,
@@ -50,7 +51,7 @@ export default function StatTiles({ points, predicted, product, nowMs }: Props) 
         ? {
             label: `Next ${extreme.kind} tide`,
             value: fmtTime(extreme.t),
-            sub: fmtMeters(extreme.value),
+            sub: `${fmtDuration(extreme.t - nowMs)} · ${fmtMeters(extreme.value)}`,
           }
         : { label: 'Next tide', value: '—' },
     ]

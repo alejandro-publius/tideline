@@ -85,6 +85,13 @@ const dayTimeFmt = new Intl.DateTimeFormat(undefined, {
   minute: '2-digit',
 })
 
+/** "in 2h 14m" / "in 45 min" — used for the next-tide countdown. */
+export function fmtDuration(ms: number): string {
+  const mins = Math.max(0, Math.round(ms / 60_000))
+  const h = Math.floor(mins / 60)
+  return h > 0 ? `in ${h}h ${mins % 60}m` : `in ${mins} min`
+}
+
 export const fmtTime = (ms: number) => timeFmt.format(new Date(ms))
 export const fmtDayTime = (ms: number) => dayTimeFmt.format(new Date(ms))
 export const fmtMeters = (v: number) => `${v.toFixed(2)} m`
