@@ -3,14 +3,14 @@ import { useEffect } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { fmtLevel, SURGE_THRESHOLD, type Units } from '../lib/tides'
 import { useChartTheme, type ChartTheme } from '../theme'
-import type { Station } from '../types'
+import type { Station, StationOverview } from '../types'
 
 interface Props {
   stations: Station[]
   selectedId: string | null
   onSelect: (id: string) => void
-  /** latest surge per station id; undefined key or null value = unknown */
-  surgeById: Record<string, number | null>
+  /** latest overview row per station id; missing key = no data yet */
+  overviewById: Record<string, StationOverview>
   units: Units
 }
 
@@ -49,7 +49,7 @@ function markerColor(surge: number | null | undefined, theme: ChartTheme): strin
   return theme.muted
 }
 
-export default function StationMap({ stations, selectedId, onSelect, surgeById, units }: Props) {
+export default function StationMap({ stations, selectedId, onSelect, overviewById, units }: Props) {
   const fmtSurge = (surge: number) => `${surge >= 0 ? '+' : '−'}${fmtLevel(Math.abs(surge), units)}`
   const threshold = fmtLevel(SURGE_THRESHOLD, units)
   const theme = useChartTheme()
@@ -66,25 +66,29 @@ export default function StationMap({ stations, selectedId, onSelect, surgeById, 
         <PanToSelection station={stations.find((s) => s.id === selectedId)} />
         {stations.map((station) => {
           const selected = station.id === selectedId
-          const surge = surgeById[station.id]
+          const row = overviewById[station.id]
+          const surge = row?.surge ?? null
+          const flooding = row?.flood_stage ?? null
           const known = surge != null
+          const fill = flooding ? theme.surgeAbove : markerColor(surge, theme)
           return (
             <CircleMarker
               key={station.id}
               center={[station.lat, station.lon]}
-              radius={selected ? 9 : 6.5}
+              radius={selected ? 9 : flooding ? 8.5 : 6.5}
               pathOptions={{
-                color: selected ? theme.surface : markerColor(surge, theme),
-                weight: selected ? 2.5 : 1,
+                color: selected ? theme.surface : flooding ? theme.surgeAbove : fill,
+                weight: selected ? 2.5 : flooding ? 2 : 1,
                 dashArray: known ? undefined : '3 3',
-                fillColor: markerColor(surge, theme),
-                fillOpacity: known ? (selected ? 1 : 0.85) : 0.15,
+                fillColor: fill,
+                fillOpacity: known ? (selected || flooding ? 1 : 0.85) : 0.15,
               }}
               eventHandlers={{ click: () => onSelect(station.id) }}
             >
               <Tooltip direction="top" offset={[0, -6]}>
                 {station.name}, {station.state}
                 {known && ` · surge ${fmtSurge(surge)}`}
+                {flooding && ` · ${flooding.toUpperCase()} FLOODING`}
               </Tooltip>
             </CircleMarker>
           )

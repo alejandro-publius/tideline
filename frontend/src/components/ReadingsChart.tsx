@@ -30,6 +30,8 @@ interface Props {
   product: Product
   nowMs: number
   units: Units
+  /** NWS minor flood threshold (meters MLLW); drawn when within reach of the data */
+  floodMinor?: number | null
 }
 
 interface TooltipEntry {
@@ -66,10 +68,16 @@ function ChartTooltip({
   )
 }
 
-export default function ReadingsChart({ points, product, nowMs, units }: Props) {
+export default function ReadingsChart({ points, product, nowMs, units, floodMinor }: Props) {
   const theme = useChartTheme()
   const hasPredicted = points.some((p) => p.predicted !== undefined)
   const isLevel = product === 'water_level'
+  const dataMax = Math.max(
+    ...points.flatMap((p) => [p.observed, p.predicted].filter((v): v is number => v !== undefined)),
+  )
+  // only draw the flood line when the water is anywhere near it — a threshold
+  // 2 m above the whole window would just squash the tide curve
+  const showFloodLine = isLevel && floodMinor != null && floodMinor <= dataMax + 0.75
   const fmtValue = (v: number) => (isLevel ? fmtLevel(v, units) : fmtTemp(v, units))
   const axisValue = (v: number) => (isLevel ? levelValue(v, units) : tempValue(v, units))
   const spansDays = points.length > 1 && points[points.length - 1].t - points[0].t > 24 * 3600_000
@@ -131,6 +139,20 @@ export default function ReadingsChart({ points, product, nowMs, units }: Props) 
               stroke={theme.muted}
               strokeDasharray="3 3"
               label={{ value: 'now', fill: theme.muted, fontSize: 11, position: 'insideTopRight' }}
+            />
+          )}
+          {showFloodLine && (
+            <ReferenceLine
+              y={floodMinor}
+              ifOverflow="extendDomain"
+              stroke={theme.surgeAbove}
+              strokeDasharray="2 4"
+              label={{
+                value: `NWS minor flood · ${fmtLevel(floodMinor, units)}`,
+                fill: theme.muted,
+                fontSize: 11,
+                position: 'insideBottomLeft',
+              }}
             />
           )}
           <Line

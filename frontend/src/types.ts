@@ -4,7 +4,13 @@ export interface Station {
   state: string
   lat: number
   lon: number
+  /** NWS coastal flood thresholds, meters above MLLW */
+  flood_minor: number | null
+  flood_moderate: number | null
+  flood_major: number | null
 }
+
+export type FloodStage = 'minor' | 'moderate' | 'major'
 
 export type Product = 'water_level' | 'water_temperature'
 
@@ -29,4 +35,5 @@ export interface StationOverview {
   observed: number | null
   predicted: number | null
   surge: number | null
+  flood_stage: FloodStage | null
 }

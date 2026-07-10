@@ -119,8 +119,8 @@ export default function App() {
   )
   const nowMs = useMemo(() => Date.now(), [observed]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedStation = stations.find((s) => s.id === selectedId)
-  const surgeById = useMemo(
-    () => Object.fromEntries(overview.map((row) => [row.station.id, row.surge])),
+  const overviewById = useMemo(
+    () => Object.fromEntries(overview.map((row) => [row.station.id, row])),
     [overview],
   )
 
@@ -147,7 +147,7 @@ export default function App() {
               stations={stations}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              surgeById={surgeById}
+              overviewById={overviewById}
               units={units}
             />
           ) : (
@@ -216,10 +216,17 @@ export default function App() {
                 product={product}
                 nowMs={nowMs}
                 units={units}
+                floodMinor={selectedStation?.flood_minor}
               />
               <div className={`card chart-card${loading ? ' is-loading' : ''}`}>
                 {points.length > 0 ? (
-                  <ReadingsChart points={points} product={product} nowMs={nowMs} units={units} />
+                  <ReadingsChart
+                    points={points}
+                    product={product}
+                    nowMs={nowMs}
+                    units={units}
+                    floodMinor={selectedStation?.flood_minor}
+                  />
                 ) : (
                   <p className="placeholder">{loading ? 'Loading readings…' : emptyMessage}</p>
                 )}

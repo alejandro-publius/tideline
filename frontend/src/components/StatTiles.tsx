@@ -17,6 +17,8 @@ interface Props {
   product: Product
   nowMs: number
   units: Units
+  /** NWS minor flood threshold (meters MLLW) for the selected station */
+  floodMinor?: number | null
 }
 
 interface Tile {
@@ -25,7 +27,7 @@ interface Tile {
   sub?: string
 }
 
-export default function StatTiles({ points, predicted, product, nowMs, units }: Props) {
+export default function StatTiles({ points, predicted, product, nowMs, units, floodMinor }: Props) {
   const tiles = useMemo<Tile[]>(() => {
     if (product === 'water_temperature') {
       const temps = points.filter((p) => p.observed !== undefined).map((p) => p.observed as number)
@@ -41,6 +43,23 @@ export default function StatTiles({ points, predicted, product, nowMs, units }: 
     const extreme = nextExtreme(predicted, nowMs)
     if (!surge) return []
     const sign = surge.surge >= 0 ? '+' : '−'
+    const floodTile: Tile[] = []
+    if (floodMinor != null) {
+      const headroom = floodMinor - surge.observed
+      floodTile.push(
+        headroom > 0
+          ? {
+              label: 'To minor flood',
+              value: fmtLevel(headroom, units),
+              sub: `NWS stage at ${fmtLevel(floodMinor, units)}`,
+            }
+          : {
+              label: 'Flood stage',
+              value: 'Flooding',
+              sub: `${fmtLevel(-headroom, units)} above NWS minor stage`,
+            },
+      )
+    }
     return [
       { label: 'Observed', value: fmtLevel(surge.observed, units), sub: fmtTime(surge.t) },
       { label: 'Predicted', value: fmtLevel(surge.predicted, units), sub: 'astronomical tide' },
@@ -56,8 +75,9 @@ export default function StatTiles({ points, predicted, product, nowMs, units }: 
             sub: `${fmtDuration(extreme.t - nowMs)} · ${fmtLevel(extreme.value, units)}`,
           }
         : { label: 'Next tide', value: '—' },
+      ...floodTile,
     ]
-  }, [points, predicted, product, nowMs, units])
+  }, [points, predicted, product, nowMs, units, floodMinor])
 
   if (tiles.length === 0) return null
   return (
