@@ -12,7 +12,7 @@ WORKDIR /app
 
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[postgres]"
 
 COPY --from=frontend /build/dist ./static
 

@@ -21,6 +21,9 @@ dev = [
     "respx>=0.21",
     "ruff>=0.4",
 ]
+postgres = [
+    "psycopg[binary]>=3.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

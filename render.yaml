@@ -5,3 +5,8 @@ services:
     plan: free
     healthCheckPath: /api/healthz
     autoDeploy: true
+    envVars:
+      # Point at a managed Postgres (e.g. a free Neon instance) so surge
+      # history survives redeploys; leave unset for ephemeral SQLite.
+      - key: TIDELINE_DATABASE_URL
+        sync: false
