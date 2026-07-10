@@ -388,6 +388,40 @@ a.panel-sub:hover {
   background: var(--status-serious);
 }
 
+/* Loading skeletons */
+.skeleton {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--grid);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--shimmer), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+:root {
+  --shimmer: rgba(255, 255, 255, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shimmer: rgba(255, 255, 255, 0.06);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 /* States */
 .placeholder {
   margin: 0;

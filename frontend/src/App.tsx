@@ -15,6 +15,26 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Re
 
 const initialState = readUrlState(window.location.search)
 
+/** Shimmer placeholders shown only on the very first load (no data yet). */
+function LoadingSkeleton() {
+  return (
+    <>
+      <div className="tiles" aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="card tile">
+            <span className="skeleton" style={{ width: 84, height: 12 }} />
+            <span className="skeleton" style={{ width: 100, height: 24 }} />
+            <span className="skeleton" style={{ width: 64, height: 12 }} />
+          </div>
+        ))}
+      </div>
+      <div className="card chart-card" aria-label="Loading chart">
+        <div className="skeleton" style={{ width: '100%', height: 320 }} />
+      </div>
+    </>
+  )
+}
+
 export default function App() {
   const [stations, setStations] = useState<Station[]>([])
   const [stationsError, setStationsError] = useState<string | null>(null)
@@ -186,6 +206,8 @@ export default function App() {
                 Retry
               </button>
             </div>
+          ) : loading && !observed ? (
+            <LoadingSkeleton />
           ) : (
             <>
               <StatTiles
