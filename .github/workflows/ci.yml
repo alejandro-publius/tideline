@@ -46,3 +46,20 @@ jobs:
         run: npm test
       - name: Typecheck and build
         run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t tideline .
+      - name: Smoke test container
+        run: |
+          docker run -d --rm -p 8000:8000 --name tideline tideline
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/api/healthz && break
+            sleep 1
+          done
+          curl -sf http://localhost:8000/api/healthz
+          curl -sf http://localhost:8000/ | grep -q Tideline
+          docker stop tideline
