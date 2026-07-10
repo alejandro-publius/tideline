@@ -6,18 +6,22 @@ import SourceBadge from './components/SourceBadge'
 import StationMap from './components/StationMap'
 import StatTiles from './components/StatTiles'
 import { mergeSeries } from './lib/tides'
+import { DEFAULT_STATION, readUrlState, writeUrlState } from './lib/urlState'
 import type { Product, Series, Station } from './types'
 
-const DEFAULT_STATION = '9414290' // San Francisco
+const REFRESH_INTERVAL_MS = 5 * 60_000
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Request failed')
+
+const initialState = readUrlState(window.location.search)
 
 export default function App() {
   const [stations, setStations] = useState<Station[]>([])
   const [stationsError, setStationsError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [product, setProduct] = useState<Product>('water_level')
-  const [hours, setHours] = useState(24)
+  const [selectedId, setSelectedId] = useState<string | null>(initialState.station)
+  const [product, setProduct] = useState<Product>(initialState.product)
+  const [hours, setHours] = useState(initialState.hours)
+  const [refreshTick, setRefreshTick] = useState(0)
 
   const [observed, setObserved] = useState<Series | null>(null)
   const [predicted, setPredicted] = useState<Series | null>(null)
@@ -29,7 +33,8 @@ export default function App() {
     fetchStations(ctrl.signal)
       .then((list) => {
         setStations(list)
-        setSelectedId((current) => current ?? DEFAULT_STATION)
+        // keep a station from the URL only if it actually exists
+        setSelectedId((cur) => (cur && list.some((s) => s.id === cur) ? cur : DEFAULT_STATION))
       })
       .catch((err) => {
         if (!ctrl.signal.aborted) setStationsError(errorMessage(err))
@@ -58,7 +63,22 @@ export default function App() {
         if (!ctrl.signal.aborted) setLoading(false)
       })
     return () => ctrl.abort()
+  }, [selectedId, product, hours, refreshTick])
+
+  // shareable URLs: reflect the current view without spamming history
+  useEffect(() => {
+    if (!selectedId) return
+    const qs = writeUrlState({ station: selectedId, product, hours })
+    window.history.replaceState(null, '', `${window.location.pathname}${qs}`)
   }, [selectedId, product, hours])
+
+  // keep a visible dashboard live; hidden tabs don't poll
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') setRefreshTick((t) => t + 1)
+    }, REFRESH_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [])
 
   const points = useMemo(
     () => mergeSeries(observed?.readings ?? [], predicted?.readings ?? []),
@@ -66,6 +86,11 @@ export default function App() {
   )
   const nowMs = useMemo(() => Date.now(), [observed]) // eslint-disable-line react-hooks/exhaustive-deps
   const selectedStation = stations.find((s) => s.id === selectedId)
+
+  const emptyMessage =
+    product === 'water_temperature'
+      ? 'No water temperature sensor at this station.'
+      : 'No data available for this station.'
 
   return (
     <div className="app">
@@ -93,14 +118,48 @@ export default function App() {
               <h2>
                 {selectedStation ? `${selectedStation.name}, ${selectedStation.state}` : '—'}
               </h2>
-              {selectedStation && <span className="panel-sub">Station {selectedStation.id}</span>}
+              {selectedStation && (
+                <a
+                  className="panel-sub"
+                  href={`https://tidesandcurrents.noaa.gov/stationhome.html?id=${selectedStation.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Station {selectedStation.id} ↗
+                </a>
+              )}
             </div>
-            <Controls product={product} onProduct={setProduct} hours={hours} onHours={setHours} />
+            <div className="controls-row">
+              <label className="station-select">
+                <span className="visually-hidden">Station</span>
+                <select
+                  value={selectedId ?? ''}
+                  onChange={(event) => setSelectedId(event.target.value)}
+                >
+                  {stations.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}, {s.state}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Controls
+                product={product}
+                onProduct={setProduct}
+                hours={hours}
+                onHours={setHours}
+              />
+            </div>
           </div>
 
           {seriesError ? (
             <div className="card error-card" role="alert">
-              <strong>Couldn’t load readings.</strong> {seriesError}
+              <span>
+                <strong>Couldn’t load readings.</strong> {seriesError}
+              </span>
+              <button type="button" onClick={() => setRefreshTick((t) => t + 1)}>
+                Retry
+              </button>
             </div>
           ) : (
             <>
@@ -114,7 +173,7 @@ export default function App() {
                 {points.length > 0 ? (
                   <ReadingsChart points={points} product={product} nowMs={nowMs} />
                 ) : (
-                  <p className="placeholder">{loading ? 'Loading readings…' : 'No data.'}</p>
+                  <p className="placeholder">{loading ? 'Loading readings…' : emptyMessage}</p>
                 )}
               </div>
             </>
