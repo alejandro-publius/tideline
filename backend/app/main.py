@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
@@ -21,6 +22,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Tideline API", version="0.1.0", lifespan=lifespan)
 settings = get_settings()
+
+# Series payloads are a few hundred rows of JSON — well worth compressing
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 if settings.cors_origins:
     app.add_middleware(
