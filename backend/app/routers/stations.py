@@ -10,7 +10,7 @@ from ..database import get_db
 from ..models import Station
 from ..noaa import NoaaClient
 from ..schemas import SeriesOut, StationOut
-from ..service import UpstreamUnavailable, get_series, utcnow
+from ..service import PREDICTIONS_LOOKAHEAD_HOURS, UpstreamUnavailable, get_series, utcnow
 
 router = APIRouter(prefix="/api/stations", tags=["stations"])
 
@@ -53,19 +53,19 @@ def get_readings(
 @router.get("/{station_id}/predictions", response_model=SeriesOut)
 def get_predictions(
     station_id: str,
-    hours: int = Query(default=24, ge=1, le=48),
+    hours: int = Query(default=24, ge=1, le=72),
     db: Session = Depends(get_db),
     client: NoaaClient = Depends(get_noaa_client),
 ) -> SeriesOut:
-    """Astronomical tide predictions from `hours` ago to `hours` ahead.
+    """Astronomical tide predictions from `hours` ago to up to 48 h ahead.
 
     The window extends into the future so the UI can chart the upcoming tide
     alongside what was observed.
     """
     station = _get_station(db, station_id)
     now = utcnow()
-    delta = timedelta(hours=hours)
-    return _series_response(db, client, station, "predictions", now - delta, now + delta)
+    ahead = timedelta(hours=min(hours, PREDICTIONS_LOOKAHEAD_HOURS))
+    return _series_response(db, client, station, "predictions", now - timedelta(hours=hours), now + ahead)
 
 
 def _series_response(db, client, station, product, begin, end) -> SeriesOut:
