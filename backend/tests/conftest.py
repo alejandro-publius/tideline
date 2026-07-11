@@ -7,8 +7,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
+from app.noaa import NoaaClient
+from app.routers.stations import get_noaa_client
 from app.seed import seed_stations
 from app.service import utcnow
 
@@ -73,6 +76,13 @@ def db(session_factory):
         yield session
 
 
+def _no_retry_client() -> NoaaClient:
+    """App NOAA client with retries and memoization disabled, so endpoint tests
+    stay deterministic and never sleep on backoff. Retry/backoff/caching are
+    covered directly in test_noaa_client."""
+    return NoaaClient(get_settings().noaa_base_url, max_retries=0, backoff_base=0, cache_ttl=0)
+
+
 @pytest.fixture()
 def client(session_factory):
     def override_get_db():
@@ -83,6 +93,7 @@ def client(session_factory):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_noaa_client] = _no_retry_client
     try:
         yield TestClient(app)
     finally:

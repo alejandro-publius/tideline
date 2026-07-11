@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, aliased
 from ..config import get_settings
 from ..database import get_db
 from ..models import Reading, Station
-from ..noaa import NoaaClient
-from ..schemas import DailySurgeOut, SeriesOut, StationOut
+from ..noaa import NoaaClient, make_noaa_client
+from ..schemas import DailySurgeOut, ReadingOut, SeriesOut, StationOut
 from ..service import PREDICTIONS_LOOKAHEAD_HOURS, UpstreamUnavailable, get_series, utcnow
 
 router = APIRouter(prefix="/api/stations", tags=["stations"])
@@ -21,7 +21,7 @@ class ObservedProduct(str, Enum):
 
 
 def get_noaa_client() -> NoaaClient:
-    return NoaaClient(get_settings().noaa_base_url)
+    return make_noaa_client(get_settings())
 
 
 def _get_station(db: Session, station_id: str) -> Station:
@@ -129,5 +129,5 @@ def _series_response(db, client, station, product, begin, end) -> SeriesOut:
         product=product,
         source=result.source,
         fetched_at=result.fetched_at,
-        readings=result.readings,
+        readings=[ReadingOut.model_validate(r) for r in result.readings],
     )

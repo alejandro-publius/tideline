@@ -11,11 +11,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import Base, SessionLocal, engine, ensure_schema
-from .noaa import NoaaClient
+from .logging_config import configure_logging
+from .noaa import make_noaa_client
 from .routers import overview, stations
 from .seed import seed_stations
 from .service import get_overview
 
+configure_logging(get_settings().log_level)
 logger = logging.getLogger("tideline")
 
 
@@ -23,7 +25,9 @@ def _refresh_all_stations() -> None:
     """One sweep of every station so surge history accumulates without visitors."""
     settings = get_settings()
     with SessionLocal() as db:
-        get_overview(db, NoaaClient(settings.noaa_base_url))
+        rows = get_overview(db, make_noaa_client(settings))
+    fresh = sum(1 for row in rows if row.observed is not None)
+    logger.info("history sweep complete", extra={"stations": len(rows), "with_observation": fresh})
 
 
 async def _history_loop(interval_minutes: int) -> None:
