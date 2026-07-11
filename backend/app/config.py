@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # background sweep that keeps surge history accumulating without visitors
     # (0 disables it)
     history_refresh_minutes: int = 30
+    # per-client API request budget: token bucket, refilled continuously
+    # (0 disables limiting)
+    rate_limit_per_minute: int = 120
     cors_origins: str = "http://localhost:5173"
     static_dir: str = ""
     # NOAA client resilience: retries with exponential backoff on transient

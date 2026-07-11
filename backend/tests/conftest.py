@@ -7,15 +7,26 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import metrics
 from app.config import get_settings
 from app.database import Base, get_db
-from app.main import app
+from app.main import app, limiter
 from app.noaa import NoaaClient
 from app.routers.stations import get_noaa_client
 from app.seed import seed_stations
 from app.service import utcnow
 
 NOAA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_counters_and_buckets():
+    """Metrics and rate-limit buckets are process-global; zero them per test so
+    no test observes another's counts or inherits a drained token bucket."""
+    metrics.reset()
+    limiter.reset()
+    yield
+
 
 # Point at a real database (e.g. postgres in CI) to run the suite against it;
 # unset = fast in-memory SQLite.

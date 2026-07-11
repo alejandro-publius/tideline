@@ -16,6 +16,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import metrics
 from .config import get_settings
 from .models import FetchLog, Reading, Station
 from .noaa import NoaaClient, NoaaError
@@ -88,6 +89,7 @@ def get_series(
             log = _touch_log(db, log, station.id, product, now)
             source = "noaa"
 
+    metrics.CACHE_LOOKUPS.inc(result=source)
     readings = db.scalars(
         select(Reading)
         .where(

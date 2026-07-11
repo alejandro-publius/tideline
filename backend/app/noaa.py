@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from . import metrics
+
 if TYPE_CHECKING:
     from .config import Settings
 
@@ -78,9 +80,10 @@ class NoaaClient:
         attempts = self.max_retries + 1
         for attempt in range(1, attempts + 1):
             try:
-                return self._fetch_once(station_id, product, begin, end)
+                series = self._fetch_once(station_id, product, begin, end)
             except _TransientNoaaError as exc:
                 if attempt == attempts:
+                    metrics.NOAA_REQUESTS.inc(outcome="error")
                     logger.error(
                         "noaa request failed station=%s product=%s attempts=%d error=%s",
                         station_id,
@@ -89,6 +92,7 @@ class NoaaClient:
                         exc,
                     )
                     raise NoaaError(str(exc)) from exc
+                metrics.NOAA_RETRIES.inc()
                 wait = self.backoff_base * 2 ** (attempt - 1)
                 logger.warning(
                     "noaa transient failure station=%s product=%s attempt=%d/%d "
@@ -101,6 +105,12 @@ class NoaaClient:
                     exc,
                 )
                 self._sleep(wait)
+            except NoaaError:
+                metrics.NOAA_REQUESTS.inc(outcome="error")
+                raise
+            else:
+                metrics.NOAA_REQUESTS.inc(outcome="ok")
+                return series
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _fetch_once(self, station_id: str, product: str, begin: datetime, end: datetime) -> Series:

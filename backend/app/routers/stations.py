@@ -1,7 +1,9 @@
+from collections.abc import Iterator
 from datetime import timedelta
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
@@ -117,6 +119,52 @@ def get_history(
         )
         for row in rows
     ]
+
+
+@router.get("/{station_id}/export")
+def export_history(
+    station_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Accumulated observed/predicted/surge history as a CSV download.
+
+    The row-level counterpart to /history: the same observed-to-prediction
+    join, but exported as a clean, analysis-ready dataset instead of daily
+    aggregates. Served entirely from the database — no NOAA calls.
+    """
+    station = _get_station(db, station_id)
+    observed, predicted = aliased(Reading), aliased(Reading)
+    # Materialized before streaming: the request-scoped session closes when the
+    # endpoint returns, so rows can't be pulled lazily from the response body.
+    # A year of 6-minute readings is ~88k rows — a few MB, fine to hold.
+    rows = db.execute(
+        select(observed.ts, observed.value, predicted.value)
+        .join(
+            predicted,
+            (predicted.station_id == observed.station_id)
+            & (predicted.ts == observed.ts)
+            & (predicted.product == "predictions"),
+        )
+        .where(
+            observed.station_id == station.id,
+            observed.product == "water_level",
+            observed.ts >= utcnow() - timedelta(days=days),
+        )
+        .order_by(observed.ts)
+    ).all()
+
+    def csv_lines() -> Iterator[str]:
+        yield "ts,observed_m,predicted_m,surge_m\n"
+        for ts, obs, pred in rows:
+            yield f"{ts.isoformat()}Z,{obs},{pred},{round(obs - pred, 3)}\n"
+
+    filename = f"tideline_{station.id}_{days}d.csv"
+    return StreamingResponse(
+        csv_lines(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _series_response(db, client, station, product, begin, end) -> SeriesOut:

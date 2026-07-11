@@ -7,12 +7,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import metrics
 from .config import get_settings
 from .database import Base, SessionLocal, engine, ensure_schema
 from .logging_config import configure_logging
 from .noaa import make_noaa_client
+from .ratelimit import RateLimiter, RateLimitMiddleware
 from .routers import overview, stations
 from .seed import seed_stations
 from .service import get_overview
@@ -68,6 +71,14 @@ if settings.cors_origins:
         allow_headers=["*"],
     )
 
+# Middleware runs outside-in (added later = runs earlier): the rate limiter
+# sits outside CORS/gzip so rejected requests do no work, and metrics sit
+# outermost so throttled 429s are counted like everything else.
+limiter = RateLimiter(settings.rate_limit_per_minute)
+if settings.rate_limit_per_minute > 0:
+    app.add_middleware(RateLimitMiddleware, limiter=limiter)
+app.add_middleware(metrics.MetricsMiddleware)
+
 app.include_router(stations.router)
 app.include_router(overview.router)
 
@@ -75,6 +86,13 @@ app.include_router(overview.router)
 @app.get("/api/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/metrics", response_class=PlainTextResponse)
+def metrics_endpoint() -> PlainTextResponse:
+    """Operational counters (requests, cache results, NOAA fetches, throttles)
+    in Prometheus text exposition format."""
+    return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
 
 # In production the built frontend is served from the same process (see Dockerfile).
