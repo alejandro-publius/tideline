@@ -22,3 +22,6 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# local Claude Code config
+.claude/

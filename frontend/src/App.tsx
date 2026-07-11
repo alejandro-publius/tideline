@@ -187,6 +187,7 @@ export default function App() {
                 </select>
               </label>
               <Controls
+                stationId={selectedId ?? DEFAULT_STATION}
                 product={product}
                 onProduct={setProduct}
                 hours={hours}
