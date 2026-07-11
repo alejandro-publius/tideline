@@ -3,8 +3,10 @@
 **Live NOAA water levels vs. astronomical tide predictions — and the surge residual between them.**
 
 [![CI](https://github.com/alejandro-publius/tideline/actions/workflows/ci.yml/badge.svg)](https://github.com/alejandro-publius/tideline/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/alejandro-publius/tideline/branch/main/graph/badge.svg)](https://codecov.io/gh/alejandro-publius/tideline)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Live demo:** coming online — deploys in one click from this repo (see [Deploying](#deploying-to-render-free-tier)); runs locally in two commands.
+**Live demo:** `TODO (human):` paste the deployed URL here — nothing is deployed yet. The repo deploys in one click (see [DEPLOY.md](DEPLOY.md) and [Deploying](#deploying-to-render-free-tier)) and runs locally in two commands.
 
 Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tidesandcurrents.noaa.gov/api/prod/), caches it in SQLite, and shows each station's **observed water level** against the **astronomical prediction** (the tide as pure celestial mechanics would have it). The difference between the two — the **surge residual** — is the interesting part: it's the signature of storm surge, wind setup, and pressure anomalies that the tide tables can't see.
 
@@ -41,14 +43,16 @@ flowchart LR
     subgraph Backend[FastAPI]
         API[REST API]
         SVC[Cache service<br/>TTL + stale fallback]
+        SCHED[Scheduler<br/>periodic surge-history sweep]
     end
-    DB[(SQLite<br/>stations · readings · fetch log)]
+    DB[(SQLite / Postgres<br/>stations · readings · fetch log)]
     NOAA[NOAA CO-OPS API]
 
     UI -- "/api/*" --> API
     API --> SVC
+    SCHED -- "background ingest" --> SVC
     SVC <--> DB
-    SVC -- "on cache miss" --> NOAA
+    SVC -- "on cache miss / refresh" --> NOAA
 ```
 
 The cache is the heart of the backend (`backend/app/service.py`):
@@ -61,6 +65,17 @@ The cache is the heart of the backend (`backend/app/service.py`):
 All timestamps are stored as naive UTC and serialized with an explicit `Z` suffix; the frontend renders them in the viewer's local time.
 
 The decisions behind this shape — cache vs. scheduled ingestion, SQLite-first, the retry policy, in-process rate limiting — are written up as [architecture decision records](docs/adr/).
+
+## Engineering challenges
+
+The interesting problems, in brief; the full narrative is in [WRITEUP.md](WRITEUP.md).
+
+- **Reconciling predictions against observations.** Observed levels and astronomical predictions are two independent NOAA products; their difference is only meaningful when both are sampled at the *same* instant, so readings are stored on NOAA's native 6-minute grid and paired by exact timestamp.
+- **Computing the surge residual.** `observed − predicted` is the entire non-astronomical signal — storm surge, wind setup, pressure anomalies. It's aggregated per UTC day for the history view and exposed row-by-row via CSV export.
+- **Missing and late readings.** Sensor gaps arrive as empty values, maintenance windows as non-JSON `200`s, and some stations lack a sensor entirely — all treated as *absence*, never as zero and never as a crash.
+- **Time-series storage and accumulation.** Refreshes upsert over the full 72-hour window, so history accumulates without duplicate rows; a background sweep keeps it growing with no visitors, which is what makes daily-surge history and export possible without a separate ingestion pipeline.
+- **NWS flood-stage mapping.** Observed levels are classified against each station's official minor/moderate/major thresholds (meters above MLLW), so the map shows not just "anomalous" but "anomalous relative to what floods *here*."
+- **NOAA rate limiting and flakiness.** The read-through cache collapses repeated requests; transient failures retry with exponential backoff while deterministic ones fail fast; an in-process memo de-duplicates identical calls — together keeping load on NOAA low and the app responsive when NOAA isn't.
 
 ## Security & operations
 
@@ -118,10 +133,20 @@ npm run dev                          # http://localhost:5173, proxies /api to th
 
 After the one-time setup, `make backend` / `make frontend` start either server and `make help` lists the rest (tests, lint, format).
 
+### Demo data (no NOAA needed)
+
+To explore the full app offline — map colors, surge history, CSV export — seed realistic synthetic tides (semidiurnal + diurnal predictions, plus an observed level with a storm-surge residual):
+
+```bash
+cd backend && python -m app.seed_demo --days 14
+```
+
+This populates the database and marks the cache fresh, so every endpoint serves without a live NOAA connection — handy for a reviewer or a screenshot.
+
 ### Tests
 
 ```bash
-cd backend && pytest -v      # 49 tests (or: make test-backend)
+cd backend && pytest -v      # 50 tests (or: make test-backend)
 cd frontend && npm test      # 21 tests (or: make test-frontend)
 ```
 
