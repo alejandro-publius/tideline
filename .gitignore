@@ -5,18 +5,25 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
 
 # Databases
 *.db
 *.sqlite3
 
-# Node
-node_modules/
-dist/
-
 # Environment
 .env
 .env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
 
 # Editors / OS
 .vscode/

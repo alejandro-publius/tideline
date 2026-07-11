@@ -23,8 +23,16 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
+      - name: Type check
+        run: mypy
       - name: Test
-        run: pytest -v
+        run: pytest --cov=app --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
 
   backend-postgres:
     runs-on: ubuntu-latest
