@@ -12,3 +12,4 @@ gets superseded rather than rewritten.
 | [0003](0003-naive-utc-timestamps.md) | Naive UTC everywhere inside; explicit `Z` at the serialization boundary |
 | [0004](0004-in-process-rate-limiting-and-metrics.md) | Rate limiting and metrics in-process, no Redis / no client library |
 | [0005](0005-retry-only-transient-noaa-failures.md) | Retry only transient NOAA failures, with exponential backoff |
+| [0006](0006-mcp-server-shares-read-path.md) | Expose the data over MCP, reusing the HTTP read path |
