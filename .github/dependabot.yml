@@ -1,0 +1,30 @@
+# Weekly dependency update PRs; CI (tests against SQLite + Postgres, frontend
+# build, Docker smoke test) is the merge gate. Minor/patch bumps are grouped
+# so a quiet week is one PR per ecosystem, not ten.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

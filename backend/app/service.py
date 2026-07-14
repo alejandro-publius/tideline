@@ -7,16 +7,23 @@ range) so a narrow request can't mark a wide range as fresh. When NOAA is
 unreachable, previously cached data is served with source="stale".
 """
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import metrics
 from .config import get_settings
 from .models import FetchLog, Reading, Station
 from .noaa import NoaaClient, NoaaError
+
+logger = logging.getLogger("tideline.service")
+
+Source = Literal["noaa", "cache", "stale"]
 
 # Widest range the API serves; refreshes always cover it in full.
 MAX_LOOKBACK_HOURS = 72
@@ -29,7 +36,7 @@ class UpstreamUnavailable(Exception):
 
 @dataclass
 class SeriesResult:
-    source: str  # "noaa" (fresh pull) | "cache" (within TTL) | "stale" (NOAA down)
+    source: Source  # "noaa" (fresh pull) | "cache" (within TTL) | "stale" (NOAA down)
     fetched_at: datetime | None
     readings: list[Reading]
 
@@ -63,7 +70,7 @@ def get_series(
 ) -> SeriesResult:
     log = db.get(FetchLog, (station.id, product))
     now = utcnow()
-    source = "cache"
+    source: Source = "cache"
 
     if log is None or now - log.fetched_at >= _ttl_for(product):
         try:
@@ -72,12 +79,17 @@ def get_series(
         except NoaaError as exc:
             if log is None:
                 raise UpstreamUnavailable(str(exc)) from exc
+            logger.warning(
+                "serving stale data after NOAA failure",
+                extra={"station": station.id, "product": product},
+            )
             source = "stale"
         else:
             _store(db, station.id, product, series)
             log = _touch_log(db, log, station.id, product, now)
             source = "noaa"
 
+    metrics.CACHE_LOOKUPS.inc(result=source)
     readings = db.scalars(
         select(Reading)
         .where(

@@ -14,6 +14,7 @@ const UNITS: { value: Units; label: string }[] = [
 ]
 
 interface Props {
+  stationId: string
   product: Product
   onProduct: (p: Product) => void
   hours: number
@@ -22,7 +23,15 @@ interface Props {
   onUnits: (u: Units) => void
 }
 
-export default function Controls({ product, onProduct, hours, onHours, units, onUnits }: Props) {
+export default function Controls({
+  stationId,
+  product,
+  onProduct,
+  hours,
+  onHours,
+  units,
+  onUnits,
+}: Props) {
   return (
     <div className="controls">
       <div className="seg" role="group" aria-label="Data product">
@@ -56,6 +65,15 @@ export default function Controls({ product, onProduct, hours, onHours, units, on
           </button>
         ))}
       </div>
+      {/* native download; the API sets Content-Disposition with a per-station filename */}
+      <a
+        className="export-link"
+        href={`/api/stations/${stationId}/export?days=365`}
+        download
+        title="Download this station’s observed vs. predicted history (CSV)"
+      >
+        ↓ CSV
+      </a>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -9,6 +10,13 @@ from tests.conftest import NOAA_URL
 
 BEGIN = datetime(2026, 7, 9, 0, 0)
 END = datetime(2026, 7, 9, 12, 0)
+
+
+def _client(**kwargs) -> NoaaClient:
+    """A client that never actually sleeps between retries."""
+    kwargs.setdefault("sleep", lambda _seconds: None)
+    kwargs.setdefault("cache_ttl", 0)  # disable memo unless a test opts in
+    return NoaaClient(NOAA_URL, **kwargs)
 
 
 @respx.mock
@@ -75,3 +83,94 @@ def test_sends_expected_query_params():
     assert params["units"] == "metric"
     assert params["time_zone"] == "gmt"
     assert params["begin_date"] == "20260709 00:00"
+
+
+@respx.mock
+def test_retries_transient_5xx_then_succeeds():
+    """A blip (503) is retried; the follow-up 200 is served normally."""
+    route = respx.get(NOAA_URL)
+    route.side_effect = [
+        Response(503),
+        Response(200, json={"data": [{"t": "2026-07-09 10:00", "v": "1.5"}]}),
+    ]
+
+    series = _client(max_retries=3).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert series == [(datetime(2026, 7, 9, 10, 0), 1.5)]
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_retries_network_errors_then_gives_up():
+    """A persistent connection failure exhausts retries and raises NoaaError."""
+    route = respx.get(NOAA_URL).mock(side_effect=httpx.ConnectError("refused"))
+
+    with pytest.raises(NoaaError, match="NOAA request failed"):
+        _client(max_retries=2).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert route.call_count == 3  # 1 initial + 2 retries
+
+
+@respx.mock
+def test_backoff_grows_exponentially():
+    """Waits follow base * 2**n; no sleep is longer than the one after it."""
+    respx.get(NOAA_URL).mock(side_effect=httpx.ConnectError("refused"))
+    waits: list[float] = []
+
+    with pytest.raises(NoaaError):
+        NoaaClient(
+            NOAA_URL, max_retries=3, backoff_base=0.5, cache_ttl=0, sleep=waits.append
+        ).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert waits == [0.5, 1.0, 2.0]
+
+
+@respx.mock
+def test_4xx_is_not_retried():
+    """A client error is deterministic — surface it on the first response."""
+    route = respx.get(NOAA_URL).mock(return_value=Response(404))
+
+    with pytest.raises(NoaaError, match="HTTP 404"):
+        _client(max_retries=3).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_error_payload_is_not_retried():
+    """A NOAA error payload won't change on retry."""
+    route = respx.get(NOAA_URL).mock(
+        return_value=Response(200, json={"error": {"message": "not a valid station"}})
+    )
+
+    with pytest.raises(NoaaError, match="not a valid station"):
+        _client(max_retries=3).fetch_series("0000000", "water_level", BEGIN, END)
+
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_identical_requests_are_memoized_within_ttl():
+    """A repeated identical fetch is served from the in-process memo, not NOAA."""
+    route = respx.get(NOAA_URL).mock(
+        return_value=Response(200, json={"data": [{"t": "2026-07-09 10:00", "v": "1.5"}]})
+    )
+    client = NoaaClient(NOAA_URL, cache_ttl=60)
+
+    first = client.fetch_series("9414290", "water_level", BEGIN, END)
+    second = client.fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert first == second
+    assert route.call_count == 1, "second identical request must hit the memo"
+
+
+@respx.mock
+def test_memo_distinguishes_products():
+    """The memo key includes the product, so different series don't collide."""
+    respx.get(NOAA_URL).mock(return_value=Response(200, json={"data": []}))
+    client = NoaaClient(NOAA_URL, cache_ttl=60)
+
+    client.fetch_series("9414290", "water_level", BEGIN, END)
+    client.fetch_series("9414290", "water_temperature", BEGIN, END)
+
+    assert respx.calls.call_count == 2
