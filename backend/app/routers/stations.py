@@ -4,7 +4,7 @@ from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 
 from ..config import get_settings
@@ -12,7 +12,13 @@ from ..database import get_db
 from ..models import Reading, Station
 from ..noaa import NoaaClient, make_noaa_client
 from ..schemas import DailySurgeOut, ReadingOut, SeriesOut, StationOut
-from ..service import PREDICTIONS_LOOKAHEAD_HOURS, UpstreamUnavailable, get_series, utcnow
+from ..service import (
+    PREDICTIONS_LOOKAHEAD_HOURS,
+    UpstreamUnavailable,
+    daily_surge,
+    get_series,
+    utcnow,
+)
 
 router = APIRouter(prefix="/api/stations", tags=["stations"])
 
@@ -85,39 +91,14 @@ def get_history(
     prediction at the same timestamp, then aggregated per UTC day.
     """
     station = _get_station(db, station_id)
-    observed, predicted = aliased(Reading), aliased(Reading)
-    day = func.date(observed.ts)
-    surge = observed.value - predicted.value
-    rows = db.execute(
-        select(
-            day.label("day"),
-            func.avg(surge).label("avg_surge"),
-            func.max(surge).label("max_surge"),
-            func.count().label("samples"),
-        )
-        .select_from(observed)
-        .join(
-            predicted,
-            (predicted.station_id == observed.station_id)
-            & (predicted.ts == observed.ts)
-            & (predicted.product == "predictions"),
-        )
-        .where(
-            observed.station_id == station.id,
-            observed.product == "water_level",
-            observed.ts >= utcnow() - timedelta(days=days),
-        )
-        .group_by(day)
-        .order_by(day)
-    ).all()
     return [
         DailySurgeOut(
             day=row.day,
-            avg_surge=round(row.avg_surge, 3),
-            max_surge=round(row.max_surge, 3),
+            avg_surge=row.avg_surge,
+            max_surge=row.max_surge,
             samples=row.samples,
         )
-        for row in rows
+        for row in daily_surge(db, station.id, days)
     ]
 
 

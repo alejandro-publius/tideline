@@ -10,11 +10,11 @@ unreachable, previously cached data is served with source="stale".
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, aliased
 
 from . import metrics
 from .config import get_settings
@@ -199,11 +199,14 @@ def _refresh_stale_series(
         _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
 
 
-def get_overview(db: Session, client: NoaaClient) -> list[StationOverview]:
-    """Latest observed level, prediction, and surge for every station."""
-    stations = list(db.scalars(select(Station).order_by(Station.name)))
-    _refresh_stale_series(db, client, stations, OVERVIEW_PRODUCTS)
+def overview_from_db(db: Session) -> list[StationOverview]:
+    """Latest observed/predicted/surge per station, read straight from the DB.
 
+    The read-only half of get_overview: no NOAA calls, so it reflects whatever
+    the cache and background sweep have already collected. Shared by the HTTP
+    overview endpoint (after a refresh) and the MCP server (which only reads).
+    """
+    stations = list(db.scalars(select(Station).order_by(Station.name)))
     horizon = utcnow() - timedelta(hours=2)
     rows: list[StationOverview] = []
     for station in stations:
@@ -233,6 +236,75 @@ def get_overview(db: Session, client: NoaaClient) -> list[StationOverview]:
                 row.surge = round(observed.value - predicted.value, 3)
         rows.append(row)
     return rows
+
+
+def get_overview(db: Session, client: NoaaClient) -> list[StationOverview]:
+    """Latest observed level, prediction, and surge for every station.
+
+    Refreshes any stale series from NOAA, then reads the result back.
+    """
+    stations = list(db.scalars(select(Station).order_by(Station.name)))
+    _refresh_stale_series(db, client, stations, OVERVIEW_PRODUCTS)
+    return overview_from_db(db)
+
+
+@dataclass
+class DailySurge:
+    """One UTC day of surge-residual statistics from accumulated history."""
+
+    day: date
+    avg_surge: float
+    max_surge: float
+    samples: int
+
+
+def daily_surge(db: Session, station_id: str, days: int) -> list[DailySurge]:
+    """Per-day surge statistics for a station over the trailing `days` window.
+
+    Pairs each observation with the prediction at the same timestamp and
+    aggregates the difference per UTC day. Reads only the database — no NOAA
+    calls — so it's shared by the HTTP history endpoint and the MCP server.
+    """
+    observed, predicted = aliased(Reading), aliased(Reading)
+    day = func.date(observed.ts)
+    surge = observed.value - predicted.value
+    rows = db.execute(
+        select(
+            day.label("day"),
+            func.avg(surge).label("avg_surge"),
+            func.max(surge).label("max_surge"),
+            func.count().label("samples"),
+        )
+        .select_from(observed)
+        .join(
+            predicted,
+            (predicted.station_id == observed.station_id)
+            & (predicted.ts == observed.ts)
+            & (predicted.product == "predictions"),
+        )
+        .where(
+            observed.station_id == station_id,
+            observed.product == "water_level",
+            observed.ts >= utcnow() - timedelta(days=days),
+        )
+        .group_by(day)
+        .order_by(day)
+    ).all()
+
+    # func.date() yields a str on SQLite but a date on Postgres — normalize so
+    # callers always get a real date regardless of backend.
+    def as_date(value: date | str) -> date:
+        return value if isinstance(value, date) else date.fromisoformat(value)
+
+    return [
+        DailySurge(
+            day=as_date(row.day),
+            avg_surge=round(row.avg_surge, 3),
+            max_surge=round(row.max_surge, 3),
+            samples=row.samples,
+        )
+        for row in rows
+    ]
 
 
 def _touch_log(

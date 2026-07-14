@@ -2,7 +2,7 @@
 #   backend:  python -m venv backend/.venv && backend/.venv/bin/pip install -e "backend[dev]"
 #   frontend: npm install --prefix frontend
 
-.PHONY: help setup backend frontend dev test test-backend test-frontend typecheck cov lint format
+.PHONY: help setup backend frontend mcp dev test test-backend test-frontend typecheck cov lint format
 
 help: ## list available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -17,6 +17,9 @@ backend: ## run the API with auto-reload on 127.0.0.1:8000
 
 frontend: ## run the Vite dev server on localhost:5173
 	npm run dev --prefix frontend
+
+mcp: ## run the MCP server (Tideline as agent tools, over stdio)
+	cd backend && .venv/bin/python -m app.mcp_server
 
 dev: backend ## run the API (start `make frontend` alongside in a second terminal)
 
