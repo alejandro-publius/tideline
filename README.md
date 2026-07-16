@@ -19,6 +19,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 
 ## Features
 
+- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and colour are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, scroll to zoom, click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honours `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
 - **National surge overview** — map markers turn red/blue when a station runs beyond ±0.15 m of its predicted tide, so one glance shows which coast is anomalous right now
 - **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker or use the dropdown (the map pans to off-screen picks)
 - **Observed vs. predicted overlay chart** with a "now" marker, so you can see the upcoming tide as well as the last few days
@@ -124,7 +125,7 @@ The tools reuse the exact same read-only query functions as the REST API (`servi
 |---|---|
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, httpx, pydantic-settings |
 | Database | SQLite (swap to Postgres by changing `TIDELINE_DATABASE_URL` — no dialect-specific SQL) |
-| Frontend | React 19, TypeScript, Vite, react-leaflet, Recharts |
+| Frontend | React 19, TypeScript, Vite, react-leaflet, Recharts, three.js (WebGL surge globe) |
 | Agent interface | Model Context Protocol server (`mcp`), stdio transport |
 | Tests | pytest + respx (NOAA mocked at the HTTP transport layer); Vitest for frontend logic |
 | CI/CD | GitHub Actions → Docker → Render; Dependabot for dependency updates |
@@ -165,10 +166,10 @@ This populates the database and marks the cache fresh, so every endpoint serves 
 
 ```bash
 cd backend && pytest -v      # 50 tests (or: make test-backend)
-cd frontend && npm test      # 21 tests (or: make test-frontend)
+cd frontend && npm test      # 38 tests (or: make test-frontend)
 ```
 
-The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion) and URL state round-tripping.
+The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion), URL state round-tripping, and the globe helpers (lat/lng→sphere projection, the AlphaFold confidence colour ramp, and surge→pillar-height mapping).
 
 ## Docker
 
