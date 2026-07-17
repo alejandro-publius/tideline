@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { fmtLevel, type Units } from '../lib/tides'
+import { fmtSignedLevel, type Units } from '../lib/tides'
 import { createGlobeScene, type GlobeScene, type GlobeStation } from './globeScene'
 
 interface Props {
@@ -29,9 +29,6 @@ function usePrefersReducedMotion(): boolean {
   )
 }
 
-const fmtSurge = (surge: number, units: Units) =>
-  `${surge >= 0 ? '+' : '−'}${fmtLevel(Math.abs(surge), units)}`
-
 /**
  * The lazily-loaded WebGL globe. Builds the three.js scene once, then forwards
  * data/selection/motion changes to it imperatively; pauses rendering whenever it
@@ -54,7 +51,11 @@ export default function Globe({ stations, selectedId, onSelect, units }: Props) 
         onHover: (station, clientX, clientY) => {
           if (!station) return setHover(null)
           const rect = mount.getBoundingClientRect()
-          setHover({ station, x: clientX - rect.left, y: clientY - rect.top })
+          // Clamp inside the stage so the tooltip never clips against the
+          // hero's overflow:hidden edges.
+          const x = Math.min(Math.max(clientX - rect.left, 70), rect.width - 70)
+          const y = Math.max(clientY - rect.top, 48)
+          setHover({ station, x, y })
         },
       },
       { reducedMotion: window.matchMedia(REDUCED_MOTION_QUERY).matches },
@@ -84,7 +85,9 @@ export default function Globe({ stations, selectedId, onSelect, units }: Props) 
       scene.dispose()
       sceneRef.current = null
     }
-    // onSelect is stable enough for this project; the scene reads the latest via closure
+    // Deliberately build-once: the scene is expensive to construct and every
+    // prop change is forwarded imperatively below. onSelect is App's setState
+    // dispatcher, which React guarantees is stable across renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -101,7 +104,12 @@ export default function Globe({ stations, selectedId, onSelect, units }: Props) 
   }, [reducedMotion])
 
   return (
-    <div className="globe-canvas" ref={mountRef} role="img" aria-label="3D globe of NOAA tide stations">
+    <div
+      className="globe-canvas"
+      ref={mountRef}
+      role="img"
+      aria-label="Interactive 3D globe of NOAA tide stations. Click a spike to select a station; keyboard users can pick a station from the station list below."
+    >
       {hover && (
         <div className="globe-tooltip" style={{ left: hover.x, top: hover.y }} aria-hidden="true">
           <span className="globe-tooltip-name">
@@ -110,7 +118,7 @@ export default function Globe({ stations, selectedId, onSelect, units }: Props) 
           <span className="globe-tooltip-surge">
             {hover.station.surge == null
               ? 'no fresh reading'
-              : `surge ${fmtSurge(hover.station.surge, units)}`}
+              : `surge ${fmtSignedLevel(hover.station.surge, units)}`}
             {hover.station.flooding && ' · flooding'}
           </span>
         </div>

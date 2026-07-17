@@ -29,8 +29,10 @@ function LoadingSkeleton() {
           </div>
         ))}
       </div>
-      <div className="card chart-card" aria-label="Loading chart">
-        <div className="skeleton" style={{ width: '100%', height: 320 }} />
+      {/* role="status" announces the loading state; the shimmer itself is decorative */}
+      <div className="card chart-card" role="status">
+        <span className="visually-hidden">Loading chart…</span>
+        <div className="skeleton" aria-hidden="true" style={{ width: '100%', height: 320 }} />
       </div>
     </>
   )

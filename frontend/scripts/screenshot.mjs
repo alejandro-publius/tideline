@@ -7,8 +7,8 @@
 //   npx  playwright install chromium
 //   TIDELINE_URL=https://your-app.example node scripts/screenshot.mjs
 //
-// It writes docs/screenshots/{dashboard,dashboard-dark,mobile}.png, replacing
-// the committed images with captures of the live app.
+// It writes docs/screenshots/{globe,dashboard,dashboard-dark,mobile}.png,
+// replacing the committed images with captures of the live app.
 
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -19,13 +19,15 @@ const URL = process.env.TIDELINE_URL ?? 'TODO_HUMAN_DEPLOYED_URL'
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'screenshots')
 
-// Give the map tiles, chart, and first NOAA fetch time to settle before capture.
+// Give the map tiles, chart, first NOAA fetch, and globe time to settle.
 const SETTLE_MS = 3500
 
 const SHOTS = [
   { file: 'dashboard.png', width: 1440, height: 900, colorScheme: 'light' },
   { file: 'dashboard-dark.png', width: 1440, height: 900, colorScheme: 'dark' },
   { file: 'mobile.png', width: 390, height: 844, colorScheme: 'light' },
+  // hero-only capture of the 3D surge globe (clipped, so no map below)
+  { file: 'globe.png', width: 1440, height: 900, colorScheme: 'dark', clip: '.globe-hero' },
 ]
 
 if (URL.startsWith('TODO_HUMAN')) {
@@ -35,7 +37,7 @@ if (URL.startsWith('TODO_HUMAN')) {
 
 const browser = await chromium.launch()
 try {
-  for (const { file, width, height, colorScheme } of SHOTS) {
+  for (const { file, width, height, colorScheme, clip } of SHOTS) {
     const context = await browser.newContext({
       viewport: { width, height },
       colorScheme,
@@ -43,9 +45,20 @@ try {
     })
     const page = await context.newPage()
     await page.goto(URL, { waitUntil: 'networkidle' })
+    // The globe is lazy-loaded WebGL; without this wait a capture can race the
+    // chunk download and show only the loading banner. Headless environments
+    // without WebGL never mount the canvas — fall through after a short wait
+    // rather than failing the whole run.
+    await page
+      .waitForSelector('.globe-canvas canvas', { timeout: 15_000 })
+      .catch(() => console.warn(`${file}: globe canvas never appeared (no WebGL?)`))
     await page.waitForTimeout(SETTLE_MS)
     const path = resolve(OUT_DIR, file)
-    await page.screenshot({ path })
+    if (clip) {
+      await page.locator(clip).screenshot({ path })
+    } else {
+      await page.screenshot({ path })
+    }
     console.log(`wrote ${path}`)
     await context.close()
   }

@@ -1,9 +1,10 @@
 /**
  * Pure geometry + color helpers for the 3D globe.
  *
- * Deliberately free of any `three` / WebGL import so it can be unit-tested in
- * jsdom and stay out of the eager bundle — the heavy scene code lives in
- * `components/globeScene.ts`, which is only pulled in by the lazy Globe chunk.
+ * Deliberately free of any `three` / WebGL import: the eager bundle (GlobeHero
+ * needs surgeColor for the anomaly chip) pays only for this math, never for
+ * three.js, and the functions unit-test in plain jsdom. The heavy scene code
+ * lives in `components/globeScene.ts`, pulled in only by the lazy Globe chunk.
  */
 
 export const DEG2RAD = Math.PI / 180
@@ -28,7 +29,7 @@ export function latLngToVec3(lat: number, lon: number, radius = 1): [number, num
 /**
  * Surge magnitude (m) at which "confidence" bottoms out — i.e. the sea has
  * departed so far from its astronomical prediction that the pillar glows the
- * hottest colour. Calm-day residuals sit within ±0.1 m (see SURGE_THRESHOLD),
+ * hottest color. Calm-day residuals sit within ±0.1 m (see SURGE_THRESHOLD),
  * so 0.6 m spans a calm→storm range with room to spare.
  */
 export const SURGE_FULL_SCALE = 0.6
@@ -36,7 +37,7 @@ export const SURGE_FULL_SCALE = 0.6
 /**
  * Map a surge residual to a [0, 1] "confidence" that the sea is behaving as
  * astronomy alone predicts: 1 when observed matches prediction, falling toward
- * 0 as the residual grows. This is the value the AlphaFold-style colour scale
+ * 0 as the residual grows. This is the value the AlphaFold-style color scale
  * is keyed on — the homage is deliberate: high confidence reads blue, low
  * confidence (a big storm-surge residual) reads orange.
  */
@@ -67,7 +68,7 @@ const toHex = ([r, g, b]: RGB) =>
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 /**
- * Colour for a given confidence in [0, 1], linearly interpolated between the
+ * Color for a given confidence in [0, 1], linearly interpolated between the
  * AlphaFold stops. Returns a `#rrggbb` string (consumable by both CSS and
  * `THREE.Color`), which keeps this function trivially testable.
  */
@@ -85,7 +86,7 @@ export function confidenceColor(confidence: number): string {
   return toHex(c >= 1 ? CONFIDENCE_STOPS[0][1] : CONFIDENCE_STOPS[CONFIDENCE_STOPS.length - 1][1])
 }
 
-/** Convenience: the pillar/marker colour straight from a surge residual. */
+/** Convenience: the pillar/marker color straight from a surge residual. */
 export const surgeColor = (surgeMeters: number): string =>
   confidenceColor(surgeConfidence(surgeMeters))
 
@@ -93,7 +94,7 @@ export const surgeColor = (surgeMeters: number): string =>
  * Radial height of a station's surge pillar, as a fraction of the globe radius.
  * A small floor keeps calm stations visible as luminous nubs; the magnitude
  * term lets a storm spike stretch to ~0.6 R. Height is unsigned — a pillar's
- * length encodes how anomalous the sea is, its colour how confidently so.
+ * length encodes how anomalous the sea is, its color how confidently so.
  */
 export function pillarHeight(surgeMeters: number | null | undefined, radius = 1): number {
   const mag = surgeMeters == null ? 0 : Math.min(Math.abs(surgeMeters) / SURGE_FULL_SCALE, 1.4)

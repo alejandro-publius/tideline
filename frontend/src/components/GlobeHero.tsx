@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
-import { fmtLevel, type Units } from '../lib/tides'
+import { Component, lazy, Suspense, useMemo, useState, type ReactNode } from 'react'
+import { fmtSignedLevel, type Units } from '../lib/tides'
 import { surgeColor } from '../lib/globe'
 import type { Station, StationOverview } from '../types'
 import type { GlobeStation } from './globeScene'
@@ -25,6 +25,20 @@ function detectWebGL(): boolean {
     )
   } catch {
     return false
+  }
+}
+
+/** A failed lazy chunk load (flaky network, ad blocker) must degrade to the
+ * fallback banner, not white-screen the whole dashboard. */
+class GlobeErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children
   }
 }
 
@@ -71,26 +85,35 @@ export default function GlobeHero({ stations, overviewById, selectedId, onSelect
         <span className="globe-anomaly-value">
           <span className="globe-anomaly-dot" />
           {mostAnomalous.name}, {mostAnomalous.state}
-          <span className="globe-anomaly-surge">
-            {mostAnomalous.surge >= 0 ? '+' : '−'}
-            {fmtLevel(Math.abs(mostAnomalous.surge), units)}
-          </span>
+          <span className="globe-anomaly-surge">{fmtSignedLevel(mostAnomalous.surge, units)}</span>
         </span>
       </button>
     ) : null
+
+  // Only claim liveness when at least one fresh surge reading is on screen —
+  // the eyebrow must not contradict a scene full of muted "no data" pillars.
+  const hasLiveData = mostAnomalous != null
 
   return (
     <section className="globe-hero" aria-label="3D surge globe">
       <div className="globe-stage">
         {webglOk ? (
-          <Suspense fallback={<div className="globe-loading">Rendering the coastline…</div>}>
-            <Globe
-              stations={globeStations}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              units={units}
-            />
-          </Suspense>
+          <GlobeErrorBoundary
+            fallback={
+              <div className="globe-loading">
+                The 3D view failed to load — the interactive map below has the same data.
+              </div>
+            }
+          >
+            <Suspense fallback={<div className="globe-loading">Rendering the coastline…</div>}>
+              <Globe
+                stations={globeStations}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                units={units}
+              />
+            </Suspense>
+          </GlobeErrorBoundary>
         ) : (
           <div className="globe-loading">
             3D view needs WebGL — the interactive map below has the same data.
@@ -101,20 +124,26 @@ export default function GlobeHero({ stations, overviewById, selectedId, onSelect
       <div className="globe-overlay">
         <div className="globe-intro">
           <span className="globe-eyebrow">
-            <span className="globe-live-dot" /> Live · NOAA CO-OPS
+            {hasLiveData && <span className="globe-live-dot" />}
+            {hasLiveData ? 'Live · NOAA CO-OPS' : 'NOAA CO-OPS'}
           </span>
           <h2 className="globe-title">The coastline, in three dimensions</h2>
           <p className="globe-lede">
-            Every spike is a tide station. Its <strong>height</strong> and{' '}
-            <strong>colour</strong> are the storm-surge residual — how far the sea has drifted from
-            the tide that astronomy alone predicts.
+            Every spike is a tide station. Its <strong>height</strong> and <strong>color</strong>{' '}
+            are the storm-surge residual — how far the sea has drifted from the tide that
+            astronomy alone predicts.
           </p>
         </div>
 
         {anomalyChip}
 
         <div className="globe-footer">
-          <div className="globe-scale" aria-label="Surge colour scale">
+          {/* role="img" so the aria-label is exposed (labels on generic divs are ignored) */}
+          <div
+            className="globe-scale"
+            role="img"
+            aria-label="Surge color scale: blue is calm, orange is storm surge"
+          >
             <span className="globe-scale-end">calm</span>
             <span className="globe-scale-bar" />
             <span className="globe-scale-end">storm surge</span>
@@ -124,7 +153,7 @@ export default function GlobeHero({ stations, overviewById, selectedId, onSelect
               {floodingCount} station{floodingCount > 1 ? 's' : ''} at flood stage
             </span>
           )}
-          {webglOk && <span className="globe-hint">drag to explore · scroll to zoom</span>}
+          {webglOk && <span className="globe-hint">drag to explore · ctrl + scroll to zoom</span>}
         </div>
       </div>
     </section>

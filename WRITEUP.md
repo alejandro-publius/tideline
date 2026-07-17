@@ -67,6 +67,25 @@ On top of the residual, observed levels are classified against each station's
 map can say not just "anomalous" but "how anomalous relative to what floods
 *here*."
 
+## Making the signal visible: the surge globe
+
+The residual is a number per station; the globe makes it a *shape*. Every
+station projects a luminous pillar off a slowly-turning WebGL Earth — height
+and color both encode the live residual, on a confidence ramp borrowed
+deliberately from AlphaFold's pLDDT palette: calm blue when the sea matches
+astronomy, storm orange when it doesn't. A national anomaly pattern (one coast
+red-shifted, the other calm) is legible in a glance, which no per-station
+chart can offer.
+
+The engineering constraint was that three.js is ~600 kB — bigger than every
+other dependency combined — so the globe lives in a lazy chunk that never
+touches first paint, suspends rendering when scrolled off-screen or the tab is
+hidden, and degrades to the 2D map without WebGL. The scene itself is built
+imperatively outside React (built once, mutated on data changes) with the pure
+math — projection, color ramp, pillar sizing — split into a dependency-free
+module that unit-tests like the rest of the frontend logic. The decision
+record is [ADR 0007](docs/adr/0007-imperative-webgl-globe-outside-react.md).
+
 ## Honest limits
 
 The predictions are NOAA's harmonic forecast, not a hydrodynamic model, so the

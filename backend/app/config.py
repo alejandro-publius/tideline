@@ -19,10 +19,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     static_dir: str = ""
     # NOAA client resilience: retries with exponential backoff on transient
-    # (network / 5xx) failures, plus a short in-process response memo.
+    # (network / 5xx) failures, plus a per-series cooldown after a failure so
+    # an outage is served from stale cache instead of re-paying the retry cost
+    # on every request (0 disables the cooldown).
     noaa_max_retries: int = 3
     noaa_backoff_base: float = 0.5
-    noaa_cache_ttl_seconds: float = 60.0
+    noaa_failure_cooldown_seconds: float = 60.0
     log_level: str = "INFO"
 
     model_config = {"env_prefix": "TIDELINE_"}

@@ -10,6 +10,8 @@
 
 Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tidesandcurrents.noaa.gov/api/prod/), caches it in SQLite, and shows each station's **observed water level** against the **astronomical prediction** (the tide as pure celestial mechanics would have it). The difference between the two — the **surge residual** — is the interesting part: it's the signature of storm surge, wind setup, and pressure anomalies that the tide tables can't see.
 
+![3D surge globe](docs/screenshots/globe.png)
+
 ![Tideline dashboard](docs/screenshots/dashboard.png)
 
 <p align="center">
@@ -19,7 +21,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 
 ## Features
 
-- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and colour are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, scroll to zoom, click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honours `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
+- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and color are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, scroll to zoom, click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honors `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
 - **National surge overview** — map markers turn red/blue when a station runs beyond ±0.15 m of its predicted tide, so one glance shows which coast is anomalous right now
 - **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker or use the dropdown (the map pans to off-screen picks)
 - **Observed vs. predicted overlay chart** with a "now" marker, so you can see the upcoming tide as well as the last few days
@@ -27,7 +29,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 - **Next high/low tide** with a live countdown, derived from the prediction series
 - **Shareable URLs** — station, product, and time range round-trip through the query string
 - **Read-through cache with graceful degradation** — repeated requests serve from SQLite; if NOAA is unreachable the API returns the last known data flagged `stale`, and the UI offers a retry
-- **Resilient NOAA pipeline** — transient upstream failures (network errors, 5xx) retry with exponential backoff; deterministic ones fail fast and degrade to the stale cache instead of hammering a struggling API
+- **Resilient NOAA pipeline** — transient upstream failures (network errors, 5xx) retry with exponential backoff; deterministic ones fail fast; after a failure, a short per-series cooldown serves stale data immediately instead of hammering a struggling API on every request
 - **Rate-limited, observable API** — per-client token bucket (`429` + `Retry-After`, health checks exempt) and Prometheus-format counters at `/api/metrics`: requests by route, cache hit/miss/stale, NOAA outcomes and retries, throttles
 - **CSV dataset export** — each station's accumulated observed/predicted/surge history as an analysis-ready download, one click from the dashboard
 - Stations without a sensor for a product (SF has no thermometer!) get a friendly empty state, not an error
@@ -39,18 +41,24 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 ```mermaid
 flowchart LR
     subgraph Browser
-        UI[React + TypeScript<br/>Leaflet map · Recharts chart]
+        UI[React + TypeScript<br/>three.js surge globe · Leaflet map · Recharts charts]
+    end
+    subgraph Agents[AI agents]
+        CLIENT[MCP client<br/>Claude Desktop · agent platforms]
     end
     subgraph Backend[FastAPI]
         API[REST API]
-        SVC[Cache service<br/>TTL + stale fallback]
+        MCPS[MCP server<br/>stdio · read-only tools]
+        SVC[Cache service<br/>TTL + stale fallback + failure cooldown]
         SCHED[Scheduler<br/>periodic surge-history sweep]
     end
     DB[(SQLite / Postgres<br/>stations · readings · fetch log)]
     NOAA[NOAA CO-OPS API]
 
     UI -- "/api/*" --> API
+    CLIENT -- "tool calls" --> MCPS
     API --> SVC
+    MCPS -- "shared read path" --> SVC
     SCHED -- "background ingest" --> SVC
     SVC <--> DB
     SVC -- "on cache miss / refresh" --> NOAA
@@ -76,7 +84,7 @@ The interesting problems, in brief; the full narrative is in [WRITEUP.md](WRITEU
 - **Missing and late readings.** Sensor gaps arrive as empty values, maintenance windows as non-JSON `200`s, and some stations lack a sensor entirely — all treated as *absence*, never as zero and never as a crash.
 - **Time-series storage and accumulation.** Refreshes upsert over the full 72-hour window, so history accumulates without duplicate rows; a background sweep keeps it growing with no visitors, which is what makes daily-surge history and export possible without a separate ingestion pipeline.
 - **NWS flood-stage mapping.** Observed levels are classified against each station's official minor/moderate/major thresholds (meters above MLLW), so the map shows not just "anomalous" but "anomalous relative to what floods *here*."
-- **NOAA rate limiting and flakiness.** The read-through cache collapses repeated requests; transient failures retry with exponential backoff while deterministic ones fail fast; an in-process memo de-duplicates identical calls — together keeping load on NOAA low and the app responsive when NOAA isn't.
+- **NOAA rate limiting and flakiness.** The read-through cache collapses repeated requests; transient failures retry with exponential backoff while deterministic ones fail fast; a per-series failure cooldown serves stale data during an outage instead of re-paying the retry cost per request — together keeping load on NOAA low and the app responsive when NOAA isn't.
 
 ## Security & operations
 
@@ -112,7 +120,7 @@ cd backend && python -m app.mcp_server      # serves over stdio (or: make mcp)
 
 | Tool | Returns |
 |---|---|
-| `list_stations()` | Every station with location and flood threshold |
+| `list_stations()` | Every station with location and NWS flood thresholds (minor/moderate/major) |
 | `surge_overview()` | Latest surge for all stations, **most anomalous first** |
 | `station_surge(station_id)` | Latest observed / predicted / surge / flood stage for one station |
 | `surge_history(station_id, days=30)` | Daily surge statistics over the trailing window |
@@ -160,16 +168,16 @@ To explore the full app offline — map colors, surge history, CSV export — se
 cd backend && python -m app.seed_demo --days 14
 ```
 
-This populates the database and marks the cache fresh, so every endpoint serves without a live NOAA connection — handy for a reviewer or a screenshot.
+This populates the database and marks the cache fresh, so every endpoint serves without a live NOAA connection — handy for a reviewer or a screenshot. The seeded freshness lasts one cache TTL (10 minutes for observations by default); to stay offline longer, start the server with the TTLs raised, e.g. `TIDELINE_CACHE_TTL_MINUTES=1440 TIDELINE_PREDICTIONS_TTL_MINUTES=1440 TIDELINE_HISTORY_REFRESH_MINUTES=0`.
 
 ### Tests
 
 ```bash
-cd backend && pytest -v      # 50 tests (or: make test-backend)
-cd frontend && npm test      # 38 tests (or: make test-frontend)
+cd backend && pytest -v      # 60 tests (or: make test-backend)
+cd frontend && npm test      # 39 tests (or: make test-frontend)
 ```
 
-The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion), URL state round-tripping, and the globe helpers (lat/lng→sphere projection, the AlphaFold confidence colour ramp, and surge→pillar-height mapping).
+The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), the failure cooldown (an outage is absorbed once, not re-paid per request), write-path idempotency under concurrent refreshes (the losing side of an insert race retries instead of erroring), the predictions look-ahead coverage invariant, rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion), URL state round-tripping, signed-level formatting, and the globe helpers (lat/lng→sphere projection, the AlphaFold confidence color ramp, and surge→pillar-height mapping).
 
 ## Docker
 
@@ -201,7 +209,7 @@ All settings are environment variables with sensible defaults (`backend/app/conf
 | `TIDELINE_RATE_LIMIT_PER_MINUTE` | `120` | Per-client API request budget, token bucket (`0` disables limiting) |
 | `TIDELINE_NOAA_MAX_RETRIES` | `3` | Retry budget for transient NOAA failures (network errors, 5xx) |
 | `TIDELINE_NOAA_BACKOFF_BASE` | `0.5` | Exponential backoff base between retries, in seconds |
-| `TIDELINE_NOAA_CACHE_TTL_SECONDS` | `60` | In-process memo TTL for identical NOAA requests |
+| `TIDELINE_NOAA_FAILURE_COOLDOWN_SECONDS` | `60` | After a NOAA failure, serve stale for this long instead of retrying per request (`0` disables) |
 | `TIDELINE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `TIDELINE_CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins (empty = CORS off) |
 | `TIDELINE_STATIC_DIR` | *(empty)* | If set, serve the built frontend from this directory |

@@ -1,5 +1,5 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { fmtDayTime, fmtLevel, levelValue, type TidePoint, type Units } from '../lib/tides'
+import { fmtDayTime, fmtSignedLevel, levelValue, type TidePoint, type Units } from '../lib/tides'
 import { useChartTheme, type ChartTheme } from '../theme'
 
 interface Props {
@@ -39,10 +39,7 @@ function SurgeTooltip({
           style={{ background: value >= 0 ? theme.surgeAbove : theme.surgeBelow }}
         />
         <span className="chart-tooltip-name">Surge</span>
-        <span className="chart-tooltip-value">
-          {value >= 0 ? '+' : '−'}
-          {fmtLevel(Math.abs(value), units)}
-        </span>
+        <span className="chart-tooltip-value">{fmtSignedLevel(value, units)}</span>
       </div>
     </div>
   )

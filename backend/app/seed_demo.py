@@ -8,8 +8,10 @@ that prediction plus a slowly varying **surge residual** (the storm-and-wind
 signal this app exists to surface) and a little measurement noise.
 
 Fetch-log rows are written as "just refreshed" for every (station, product),
-so `/overview` and the series endpoints serve entirely from the database and
-never reach for NOAA.
+so `/overview` and the series endpoints serve entirely from the database —
+but only for the cache TTL (10 minutes for observations by default), after
+which the app tries NOAA again. For a longer offline session, run the server
+with the TTLs raised (see the hint printed after seeding).
 
     python -m app.seed_demo            # 14 days into a fresh database
     python -m app.seed_demo --days 30
@@ -130,6 +132,12 @@ def main() -> None:
         rows = seed_demo(db, days=args.days, seed=args.seed)
         stations = db.scalar(select(func.count()).select_from(Station))
     print(f"Seeded {rows} readings across {stations} stations ({args.days} days of history).")
+    print(
+        "The seeded cache is fresh for the configured TTLs (10 min for observations"
+        " by default); to stay fully offline beyond that, start the server with:\n"
+        "  TIDELINE_CACHE_TTL_MINUTES=1440 TIDELINE_PREDICTIONS_TTL_MINUTES=1440"
+        " TIDELINE_HISTORY_REFRESH_MINUTES=0 uvicorn app.main:app"
+    )
 
 
 if __name__ == "__main__":

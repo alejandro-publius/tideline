@@ -196,8 +196,6 @@ export function createGlobeScene(
   renderer.setSize(container.clientWidth, container.clientHeight || 1)
   renderer.setClearColor(0x000000, 0)
   container.appendChild(renderer.domElement)
-  renderer.domElement.style.display = 'block'
-  renderer.domElement.style.touchAction = 'pan-y'
 
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(
@@ -218,6 +216,22 @@ export function createGlobeScene(
   controls.minDistance = 1.55
   controls.maxDistance = 6
   controls.target.set(0, 0, 0)
+
+  // Must run AFTER constructing OrbitControls — its connect() stamps
+  // touch-action:'none' on the canvas, which would trap vertical page scroll
+  // on a full-width hero. 'pan-y' lets the browser claim vertical swipes
+  // (OrbitControls recovers via pointercancel) while horizontal drags orbit.
+  renderer.domElement.style.touchAction = 'pan-y'
+
+  // Wheel-zoom only with a modifier held: a hero at the top of the page must
+  // never hijack normal page scrolling. Capture phase on the container so the
+  // flag is set before OrbitControls' own wheel listener consults it; touch
+  // pinch re-enables zoom on pointerdown below.
+  controls.enableZoom = false
+  const onWheelGate = (e: WheelEvent) => {
+    controls.enableZoom = e.ctrlKey || e.metaKey
+  }
+  container.addEventListener('wheel', onWheelGate, { capture: true, passive: true })
 
   const glowTexture = makeGlowTexture()
 
@@ -255,6 +269,11 @@ export function createGlobeScene(
 
   let pillars: Pillar[] = []
   let selectedId: string | null = null
+  // Caches kept in sync by buildPillars/applySelection so the render loop and
+  // pointermove handler never allocate: the raycast target list (earth first,
+  // so far-side stations are occluded) and the currently selected pillar.
+  let pickTargets: THREE.Object3D[] = []
+  let selectedPillar: Pillar | null = null
   let reducedMotion = opts.reducedMotion
   const color = new THREE.Color()
 
@@ -337,10 +356,13 @@ export function createGlobeScene(
 
       pillars.push({ station, dir, column, tip, ring, hit, baseTipScale })
     }
+    pickTargets = [earth, ...pillars.map((p) => p.hit)]
     applySelection()
   }
 
-  // A soft white halo drawn behind the selected station's tip.
+  // A soft white halo drawn behind the selected station's tip. Attached to
+  // globeGroup (identity transform relative to pillarGroup) so it survives
+  // pillarGroup.clear() when station data is rebuilt.
   const selectionHalo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: glowTexture,
@@ -353,19 +375,19 @@ export function createGlobeScene(
   )
   selectionHalo.scale.setScalar(0.001)
   selectionHalo.visible = false
-  pillarGroup.add(selectionHalo)
+  globeGroup.add(selectionHalo)
 
   function applySelection() {
     for (const p of pillars) {
       const isSel = p.station.id === selectedId
       p.tip.scale.setScalar(isSel ? p.baseTipScale * 1.9 : p.baseTipScale)
     }
-    const sel = pillars.find((p) => p.station.id === selectedId)
-    if (sel) {
+    selectedPillar = pillars.find((p) => p.station.id === selectedId) ?? null
+    if (selectedPillar) {
       selectionHalo.visible = true
       selectionHalo.material.opacity = 0.55
-      selectionHalo.scale.setScalar(sel.baseTipScale * 3.4)
-      selectionHalo.position.copy(sel.tip.position)
+      selectionHalo.scale.setScalar(selectedPillar.baseTipScale * 3.4)
+      selectionHalo.position.copy(selectedPillar.tip.position)
     } else {
       selectionHalo.visible = false
       selectionHalo.material.opacity = 0
@@ -385,11 +407,10 @@ export function createGlobeScene(
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
     pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
     raycaster.setFromCamera(pointer, camera)
-    const hits = raycaster.intersectObjects(
-      pillars.map((p) => p.hit),
-      false,
-    )
-    if (!hits.length) return null
+    // Earth is in the target list so it occludes: a station on the far side
+    // of the globe intersects behind the sphere and must not be pickable.
+    const hits = raycaster.intersectObjects(pickTargets, false)
+    if (!hits.length || hits[0].object === earth) return null
     const id = hits[0].object.userData.stationId as string
     return pillars.find((p) => p.station.id === id) ?? null
   }
@@ -398,6 +419,8 @@ export function createGlobeScene(
     downX = e.clientX
     downY = e.clientY
     dragging = false
+    // Touch pinch should always zoom; the wheel gate above only manages mice.
+    if (e.pointerType === 'touch') controls.enableZoom = true
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -412,14 +435,18 @@ export function createGlobeScene(
 
   function onPointerUp(e: PointerEvent) {
     // Suppress selection after an orbit drag — on touch `buttons` may stay 0
-    // during the move, so also reject by total travel from the press.
-    if (dragging || Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return
+    // during the move, so also reject by total travel from the press. Always
+    // clear the drag flag, or the ambient spin would stay paused forever.
+    const wasDrag = dragging || Math.hypot(e.clientX - downX, e.clientY - downY) > 6
+    dragging = false
+    if (wasDrag) return
     const hit = pick(e.clientX, e.clientY)
     if (hit) handlers.onSelect(hit.station.id)
   }
 
   function onPointerLeave() {
     hovered = null
+    dragging = false
     handlers.onHover(null, 0, 0)
   }
 
@@ -459,10 +486,9 @@ export function createGlobeScene(
     }
 
     // Gently pulse the selected tip so the eye keeps finding it.
-    const sel = pillars.find((p) => p.station.id === selectedId)
-    if (sel && !reducedMotion) {
+    if (selectedPillar && !reducedMotion) {
       const pulse = 1 + Math.sin(t * 3) * 0.12
-      sel.tip.scale.setScalar(sel.baseTipScale * 1.9 * pulse)
+      selectedPillar.tip.scale.setScalar(selectedPillar.baseTipScale * 1.9 * pulse)
     }
 
     renderer.render(scene, camera)
@@ -511,6 +537,7 @@ export function createGlobeScene(
     dispose() {
       cancelAnimationFrame(rafId)
       running = false
+      container.removeEventListener('wheel', onWheelGate, { capture: true })
       dom.removeEventListener('pointerdown', onPointerDown)
       dom.removeEventListener('pointermove', onPointerMove)
       dom.removeEventListener('pointerup', onPointerUp)
