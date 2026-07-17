@@ -4,11 +4,11 @@ API reference: https://api.tidesandcurrents.noaa.gov/api/prod/
 All requests use GMT and metric units; timestamps are returned as naive UTC.
 
 The client is resilient to NOAA's occasional flakiness: transient failures
-(network errors and 5xx responses) are retried with exponential backoff, and
-identical requests are memoized for a short TTL so a single operation never
-hammers the same series twice. Deterministic failures — a 4xx, an error
-payload, or a non-JSON body — are surfaced immediately without retrying, since
-retrying them would only add latency.
+(network errors and 5xx responses) are retried with exponential backoff.
+Deterministic failures — a 4xx, an error payload, or a non-JSON body — are
+surfaced immediately without retrying, since retrying them would only add
+latency. De-duplication of repeated fetches is the job of the database
+read-through cache and failure cooldown in service.py, not this client.
 """
 
 import logging
@@ -49,30 +49,17 @@ class NoaaClient:
         timeout: float = 15.0,
         max_retries: int = 3,
         backoff_base: float = 0.5,
-        cache_ttl: float = 60.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_url = base_url
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
-        self.cache_ttl = cache_ttl
         self._sleep = sleep
-        # Per-instance memo of recent series, keyed by request identity. Guards
-        # against redundant NOAA calls within one operation; the durable cache
-        # is the database read-through layer in service.py.
-        self._cache: dict[tuple[str, str, datetime, datetime], tuple[float, Series]] = {}
 
     def fetch_series(self, station_id: str, product: str, begin: datetime, end: datetime) -> Series:
         """Fetch a time series as (naive UTC timestamp, value) pairs."""
-        key = (station_id, product, begin, end)
-        cached = self._cache.get(key)
-        if cached is not None and time.monotonic() - cached[0] < self.cache_ttl:
-            logger.debug("noaa cache hit station=%s product=%s", station_id, product)
-            return cached[1]
-        series = self._fetch_with_retry(station_id, product, begin, end)
-        self._cache[key] = (time.monotonic(), series)
-        return series
+        return self._fetch_with_retry(station_id, product, begin, end)
 
     def _fetch_with_retry(
         self, station_id: str, product: str, begin: datetime, end: datetime
@@ -171,5 +158,4 @@ def make_noaa_client(settings: "Settings") -> NoaaClient:
         settings.noaa_base_url,
         max_retries=settings.noaa_max_retries,
         backoff_base=settings.noaa_backoff_base,
-        cache_ttl=settings.noaa_cache_ttl_seconds,
     )

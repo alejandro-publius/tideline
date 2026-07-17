@@ -24,7 +24,16 @@ def test_list_stations_returns_seeded_stations(db):
     assert len(stations) >= 1
     sf = next(s for s in stations if s["id"] == "9414290")
     assert sf["name"] == "San Francisco"
-    assert set(sf) == {"id", "name", "state", "lat", "lon", "flood_minor_m"}
+    assert set(sf) == {
+        "id",
+        "name",
+        "state",
+        "lat",
+        "lon",
+        "flood_minor_m",
+        "flood_moderate_m",
+        "flood_major_m",
+    }
 
 
 def test_station_surge_reports_latest_reading(db):

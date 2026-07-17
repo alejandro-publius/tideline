@@ -111,6 +111,11 @@ export const levelValue = (meters: number, units: Units) =>
 export const fmtLevel = (meters: number, units: Units, decimals = 2) =>
   `${levelValue(meters, units).toFixed(decimals)} ${units === 'us' ? 'ft' : 'm'}`
 
+/** Signed level with an explicit sign and a true minus (U+2212): "+0.12 m" / "−0.30 m".
+ * The shared formatter for surge residuals everywhere they're displayed. */
+export const fmtSignedLevel = (meters: number, units: Units, decimals = 2) =>
+  `${meters >= 0 ? '+' : '−'}${fmtLevel(Math.abs(meters), units, decimals)}`
+
 export const tempValue = (celsius: number, units: Units) =>
   units === 'us' ? (celsius * 9) / 5 + 32 : celsius
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchOverview, fetchPredictions, fetchReadings, fetchStations } from './api'
 import Controls from './components/Controls'
+import GlobeHero from './components/GlobeHero'
 import ReadingsChart from './components/ReadingsChart'
 import SourceBadge from './components/SourceBadge'
 import StationMap from './components/StationMap'
@@ -28,8 +29,10 @@ function LoadingSkeleton() {
           </div>
         ))}
       </div>
-      <div className="card chart-card" aria-label="Loading chart">
-        <div className="skeleton" style={{ width: '100%', height: 320 }} />
+      {/* role="status" announces the loading state; the shimmer itself is decorative */}
+      <div className="card chart-card" role="status">
+        <span className="visually-hidden">Loading chart…</span>
+        <div className="skeleton" aria-hidden="true" style={{ width: '100%', height: 320 }} />
       </div>
     </>
   )
@@ -140,6 +143,16 @@ export default function App() {
         <SourceBadge series={observed} />
       </header>
 
+      {stations.length > 0 && (
+        <GlobeHero
+          stations={stations}
+          overviewById={overviewById}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          units={units}
+        />
+      )}
+
       <main className="layout">
         <section className="card map-card" aria-label="Station map">
           {stations.length > 0 ? (
@@ -239,8 +252,9 @@ export default function App() {
 
       <footer className="app-footer">
         Data: <a href="https://tidesandcurrents.noaa.gov/">NOAA CO-OPS</a> · Map ©{' '}
-        <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Built
-        with FastAPI, React & SQLite
+        <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · Globe
+        coastlines <a href="https://www.naturalearthdata.com/">Natural Earth</a> · Built with
+        FastAPI, React & SQLite
       </footer>
     </div>
   )

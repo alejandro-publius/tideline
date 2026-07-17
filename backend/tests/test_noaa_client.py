@@ -15,7 +15,6 @@ END = datetime(2026, 7, 9, 12, 0)
 def _client(**kwargs) -> NoaaClient:
     """A client that never actually sleeps between retries."""
     kwargs.setdefault("sleep", lambda _seconds: None)
-    kwargs.setdefault("cache_ttl", 0)  # disable memo unless a test opts in
     return NoaaClient(NOAA_URL, **kwargs)
 
 
@@ -118,9 +117,9 @@ def test_backoff_grows_exponentially():
     waits: list[float] = []
 
     with pytest.raises(NoaaError):
-        NoaaClient(
-            NOAA_URL, max_retries=3, backoff_base=0.5, cache_ttl=0, sleep=waits.append
-        ).fetch_series("9414290", "water_level", BEGIN, END)
+        NoaaClient(NOAA_URL, max_retries=3, backoff_base=0.5, sleep=waits.append).fetch_series(
+            "9414290", "water_level", BEGIN, END
+        )
 
     assert waits == [0.5, 1.0, 2.0]
 
@@ -147,30 +146,3 @@ def test_error_payload_is_not_retried():
         _client(max_retries=3).fetch_series("0000000", "water_level", BEGIN, END)
 
     assert route.call_count == 1
-
-
-@respx.mock
-def test_identical_requests_are_memoized_within_ttl():
-    """A repeated identical fetch is served from the in-process memo, not NOAA."""
-    route = respx.get(NOAA_URL).mock(
-        return_value=Response(200, json={"data": [{"t": "2026-07-09 10:00", "v": "1.5"}]})
-    )
-    client = NoaaClient(NOAA_URL, cache_ttl=60)
-
-    first = client.fetch_series("9414290", "water_level", BEGIN, END)
-    second = client.fetch_series("9414290", "water_level", BEGIN, END)
-
-    assert first == second
-    assert route.call_count == 1, "second identical request must hit the memo"
-
-
-@respx.mock
-def test_memo_distinguishes_products():
-    """The memo key includes the product, so different series don't collide."""
-    respx.get(NOAA_URL).mock(return_value=Response(200, json={"data": []}))
-    client = NoaaClient(NOAA_URL, cache_ttl=60)
-
-    client.fetch_series("9414290", "water_level", BEGIN, END)
-    client.fetch_series("9414290", "water_temperature", BEGIN, END)
-
-    assert respx.calls.call_count == 2

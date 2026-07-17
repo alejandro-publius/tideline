@@ -8,8 +8,10 @@ that prediction plus a slowly varying **surge residual** (the storm-and-wind
 signal this app exists to surface) and a little measurement noise.
 
 Fetch-log rows are written as "just refreshed" for every (station, product),
-so `/overview` and the series endpoints serve entirely from the database and
-never reach for NOAA.
+so `/overview` and the series endpoints serve entirely from the database —
+but only for the cache TTL (10 minutes for observations by default), after
+which the app tries NOAA again. For a longer offline session, run the server
+with the TTLs raised (see the hint printed after seeding).
 
     python -m app.seed_demo            # 14 days into a fresh database
     python -m app.seed_demo --days 30
@@ -26,7 +28,13 @@ from sqlalchemy.orm import Session
 from .database import Base, SessionLocal, engine, ensure_schema
 from .models import FetchLog, Reading, Station
 from .seed import seed_stations
-from .service import MAX_LOOKBACK_HOURS, OVERVIEW_PRODUCTS, PREDICTIONS_LOOKAHEAD_HOURS, utcnow
+from .service import (
+    MAX_LOOKBACK_HOURS,
+    OVERVIEW_PRODUCTS,
+    PREDICTIONS_LOOKAHEAD_HOURS,
+    _ttl_for,
+    utcnow,
+)
 
 STEP = timedelta(minutes=6)  # NOAA's native observation cadence
 PRODUCTS = (*OVERVIEW_PRODUCTS, "water_temperature")
@@ -71,7 +79,9 @@ def seed_demo(db: Session, days: int = 14, seed: int = 1234) -> int:
     now = utcnow().replace(second=0, microsecond=0)
     now -= timedelta(minutes=now.minute % 6)  # align to the 6-minute grid
     start = now - timedelta(hours=MAX_LOOKBACK_HOURS) - timedelta(days=days)
-    pred_end = now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS)
+    # Mirror _fetch_window's over-fetch: seeded predictions must cover the full
+    # look-ahead for any request made while the seeded fetch log is fresh.
+    pred_end = now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS) + _ttl_for("predictions")
 
     rng = random.Random(seed)
     written = 0
@@ -130,6 +140,12 @@ def main() -> None:
         rows = seed_demo(db, days=args.days, seed=args.seed)
         stations = db.scalar(select(func.count()).select_from(Station))
     print(f"Seeded {rows} readings across {stations} stations ({args.days} days of history).")
+    print(
+        "The seeded cache is fresh for the configured TTLs (10 min for observations"
+        " by default); to stay fully offline beyond that, start the server with:\n"
+        "  TIDELINE_CACHE_TTL_MINUTES=1440 TIDELINE_PREDICTIONS_TTL_MINUTES=1440"
+        " TIDELINE_HISTORY_REFRESH_MINUTES=0 uvicorn app.main:app"
+    )
 
 
 if __name__ == "__main__":

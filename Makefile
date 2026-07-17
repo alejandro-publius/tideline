@@ -31,8 +31,9 @@ test-backend: ## backend suite (NOAA mocked, runs offline)
 test-frontend: ## frontend logic tests (Vitest)
 	npm test --prefix frontend
 
-typecheck: ## mypy over the backend, same as CI
+typecheck: ## mypy over the backend + tsc over the frontend, same as CI
 	cd backend && .venv/bin/mypy
+	npm run typecheck --prefix frontend
 
 cov: ## backend suite with a coverage report
 	cd backend && .venv/bin/pytest --cov=app --cov-report=term-missing

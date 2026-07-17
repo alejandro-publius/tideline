@@ -55,6 +55,8 @@ def _list_stations(db: Session) -> list[dict[str, Any]]:
             "lat": s.lat,
             "lon": s.lon,
             "flood_minor_m": s.flood_minor,
+            "flood_moderate_m": s.flood_moderate,
+            "flood_major_m": s.flood_major,
         }
         for s in stations
     ]
@@ -126,7 +128,8 @@ def _surge_history(db: Session, station_id: str, days: int) -> dict[str, Any]:
 
 @mcp.tool()
 def list_stations() -> list[dict[str, Any]]:
-    """List every monitored NOAA tide station with its location and flood threshold."""
+    """List every monitored NOAA tide station with its location and NWS flood
+    thresholds (minor/moderate/major, meters above MLLW)."""
     with SessionLocal() as db:
         return _list_stations(db)
 

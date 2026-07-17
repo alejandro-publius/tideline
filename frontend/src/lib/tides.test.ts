@@ -3,6 +3,7 @@ import type { Reading } from '../types'
 import {
   fmtDuration,
   fmtLevel,
+  fmtSignedLevel,
   fmtTemp,
   hourTicks,
   latestSurge,
@@ -133,6 +134,13 @@ describe('unit conversion', () => {
     expect(fmtTemp(20, 'metric')).toBe('20.0 °C')
     expect(fmtTemp(20, 'us')).toBe('68.0 °F')
     expect(fmtTemp(0, 'us')).toBe('32.0 °F')
+  })
+
+  it('formats signed levels with an explicit sign and a true minus', () => {
+    expect(fmtSignedLevel(0.12, 'metric')).toBe('+0.12 m')
+    expect(fmtSignedLevel(-0.3, 'metric')).toBe('−0.30 m') // U+2212, not hyphen
+    expect(fmtSignedLevel(0, 'metric')).toBe('+0.00 m')
+    expect(fmtSignedLevel(-0.35, 'us')).toBe('−1.15 ft')
   })
 })
 

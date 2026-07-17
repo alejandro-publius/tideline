@@ -1,8 +1,16 @@
 name: CI
 
+# push only for main: PR branches are covered by the pull_request trigger,
+# so unfiltered push would run every job twice per PR.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# a new push to the same branch supersedes the running build
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
