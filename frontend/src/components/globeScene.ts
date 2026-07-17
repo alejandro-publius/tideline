@@ -261,6 +261,15 @@ export function createGlobeScene(
     }),
   )
   globeGroup.add(earth)
+
+  // Occlusion proxy for picking: raycasting runs per pointermove, and the
+  // display sphere's 96×96 segments (~18k triangles) are pure waste there —
+  // a coarse invisible sphere answers "is the far side blocked?" identically.
+  const pickSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(GLOBE_RADIUS, 16, 16),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  )
+  globeGroup.add(pickSphere)
   globeGroup.add(buildGraticule(GLOBE_RADIUS * 1.001))
   globeGroup.add(buildCoastlines(GLOBE_RADIUS * 1.002))
 
@@ -356,7 +365,7 @@ export function createGlobeScene(
 
       pillars.push({ station, dir, column, tip, ring, hit, baseTipScale })
     }
-    pickTargets = [earth, ...pillars.map((p) => p.hit)]
+    pickTargets = [pickSphere, ...pillars.map((p) => p.hit)]
     applySelection()
   }
 
@@ -401,21 +410,25 @@ export function createGlobeScene(
   let downX = 0
   let downY = 0
   let dragging = false
+  let pointersDown = 0
+  let multiTouch = false // any moment with 2+ pointers poisons the gesture for selection
 
   function pick(clientX: number, clientY: number): Pillar | null {
     const rect = renderer.domElement.getBoundingClientRect()
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
     pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
     raycaster.setFromCamera(pointer, camera)
-    // Earth is in the target list so it occludes: a station on the far side
-    // of the globe intersects behind the sphere and must not be pickable.
+    // The pick sphere is in the target list so it occludes: a station on the
+    // far side of the globe intersects behind it and must not be pickable.
     const hits = raycaster.intersectObjects(pickTargets, false)
-    if (!hits.length || hits[0].object === earth) return null
+    if (!hits.length || hits[0].object === pickSphere) return null
     const id = hits[0].object.userData.stationId as string
     return pillars.find((p) => p.station.id === id) ?? null
   }
 
   function onPointerDown(e: PointerEvent) {
+    pointersDown++
+    if (pointersDown > 1) multiTouch = true
     downX = e.clientX
     downY = e.clientY
     dragging = false
@@ -435,10 +448,17 @@ export function createGlobeScene(
 
   function onPointerUp(e: PointerEvent) {
     // Suppress selection after an orbit drag — on touch `buttons` may stay 0
-    // during the move, so also reject by total travel from the press. Always
-    // clear the drag flag, or the ambient spin would stay paused forever.
-    const wasDrag = dragging || Math.hypot(e.clientX - downX, e.clientY - downY) > 6
-    dragging = false
+    // during the move, so also reject by total travel from the press — and
+    // after any multi-touch gesture (a pinch ends in near-stationary pointer
+    // ups that would otherwise read as clicks). Always clear the drag flag,
+    // or the ambient spin would stay paused forever.
+    pointersDown = Math.max(0, pointersDown - 1)
+    const wasDrag =
+      dragging || multiTouch || Math.hypot(e.clientX - downX, e.clientY - downY) > 6
+    if (pointersDown === 0) {
+      dragging = false
+      multiTouch = false
+    }
     if (wasDrag) return
     const hit = pick(e.clientX, e.clientY)
     if (hit) handlers.onSelect(hit.station.id)
@@ -450,12 +470,24 @@ export function createGlobeScene(
     handlers.onHover(null, 0, 0)
   }
 
+  // Fired when the browser claims a touch gesture (e.g. pan-y page scroll):
+  // mirror onPointerUp's bookkeeping or the counters would stay stuck and
+  // suppress every future selection.
+  function onPointerCancel() {
+    pointersDown = Math.max(0, pointersDown - 1)
+    if (pointersDown === 0) {
+      dragging = false
+      multiTouch = false
+    }
+  }
+
   const dom = renderer.domElement
   dom.style.cursor = 'grab'
   dom.addEventListener('pointerdown', onPointerDown)
   dom.addEventListener('pointermove', onPointerMove)
   dom.addEventListener('pointerup', onPointerUp)
   dom.addEventListener('pointerleave', onPointerLeave)
+  dom.addEventListener('pointercancel', onPointerCancel)
 
   // ---- animation loop, driven only while active + on-screen ----
   const clock = new THREE.Clock()
@@ -528,6 +560,8 @@ export function createGlobeScene(
     },
     setReducedMotion(reduced) {
       reducedMotion = reduced
+      // re-apply base scales so a tip isn't frozen mid-pulse
+      applySelection()
     },
     setActive(next) {
       active = next
@@ -542,6 +576,7 @@ export function createGlobeScene(
       dom.removeEventListener('pointermove', onPointerMove)
       dom.removeEventListener('pointerup', onPointerUp)
       dom.removeEventListener('pointerleave', onPointerLeave)
+      dom.removeEventListener('pointercancel', onPointerCancel)
       dom.removeEventListener('webglcontextlost', onContextLost)
       controls.dispose()
       disposePillars()

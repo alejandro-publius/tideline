@@ -167,16 +167,20 @@ def _store(
         )
         db.commit()
 
-    try:
-        insert_missing()
-    except IntegrityError:
-        # Two sessions (a request and the background sweep, or two concurrent
-        # requests) can both find the same pair stale and race this upsert; the
-        # loser trips the unique constraint. Re-read what the winner committed
-        # and insert only the still-missing rows — one retry suffices, since
-        # identical refreshes can't conflict twice.
-        db.rollback()
-        insert_missing()
+    # Concurrent sessions (requests and the background sweep) can all find the
+    # same pair stale and race this upsert; a loser trips the unique constraint.
+    # Each writer fetched at its own `utcnow()`, so the series are *nearly* but
+    # not exactly identical — a re-read converges almost always, yet a third
+    # writer can conflict again, so retry bounded and re-raise loudly after.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            insert_missing()
+            return
+        except IntegrityError:
+            db.rollback()
+            if attempt == attempts:
+                raise
 
 
 OVERVIEW_PRODUCTS = ("water_level", "predictions")
@@ -245,8 +249,18 @@ def _refresh_stale_series(
     for station, product, series in results:
         if series is None:
             continue
-        _store(db, station.id, product, series)
-        _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
+        try:
+            _store(db, station.id, product, series)
+            _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
+        except IntegrityError:
+            # A pathologically racy pair (writers conflicting past the bounded
+            # retries) must not kill the sweep — the station just stays stale
+            # this round, honoring "an overview must not die on one bad station".
+            db.rollback()
+            logger.warning(
+                "skipping station after persistent write race",
+                extra={"station": station.id, "product": product},
+            )
 
 
 def overview_from_db(db: Session) -> list[StationOverview]:
@@ -373,7 +387,9 @@ def _touch_log(
         # the winner's row instead.
         db.rollback()
         log = db.get(FetchLog, (station_id, product))
-        assert log is not None  # the loser only exists because a winner committed
+        if log is None:
+            # not the insert race after all — surface the real constraint error
+            raise
         log.fetched_at = now
         db.commit()
     return log

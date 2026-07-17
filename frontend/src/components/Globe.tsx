@@ -52,9 +52,10 @@ export default function Globe({ stations, selectedId, onSelect, units }: Props) 
           if (!station) return setHover(null)
           const rect = mount.getBoundingClientRect()
           // Clamp inside the stage so the tooltip never clips against the
-          // hero's overflow:hidden edges.
-          const x = Math.min(Math.max(clientX - rect.left, 70), rect.width - 70)
-          const y = Math.max(clientY - rect.top, 48)
+          // hero's overflow:hidden edges (margins sized to half the widest
+          // tooltip / its full height).
+          const x = Math.min(Math.max(clientX - rect.left, 110), rect.width - 110)
+          const y = Math.max(clientY - rect.top, 56)
           setHover({ station, x, y })
         },
       },

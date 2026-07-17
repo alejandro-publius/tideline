@@ -24,8 +24,9 @@ Classify failures before retrying (`noaa.py`):
   (some stations simply lack a sensor for a product).
 
 A failure also starts a short per-(station, product) cooldown in the cache
-layer: requests inside it serve stale immediately instead of each re-paying
-the full retry/timeout cost, so an outage is absorbed rather than amplified.
+layer: requests inside it serve stale immediately (or fail fast with 502 when
+nothing is cached yet) instead of each re-paying the full retry/timeout cost,
+so an outage is absorbed rather than amplified.
 (An earlier per-client response memo was removed once it proved inert —
 clients are per-request, so identical fetches never recurred within one.)
 

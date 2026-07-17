@@ -30,11 +30,19 @@ function detectWebGL(): boolean {
 
 /** A failed lazy chunk load (flaky network, ad blocker) must degrade to the
  * fallback banner, not white-screen the whole dashboard. */
-class GlobeErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }> {
+class GlobeErrorBoundary extends Component<{
+  fallback: ReactNode
+  onFailed: () => void
+  children: ReactNode
+}> {
   state = { failed: false }
 
   static getDerivedStateFromError() {
     return { failed: true }
+  }
+
+  componentDidCatch() {
+    this.props.onFailed() // lets the hero hide globe-only UI like the drag hint
   }
 
   render() {
@@ -44,6 +52,7 @@ class GlobeErrorBoundary extends Component<{ fallback: ReactNode; children: Reac
 
 export default function GlobeHero({ stations, overviewById, selectedId, onSelect, units }: Props) {
   const [webglOk] = useState(detectWebGL)
+  const [globeFailed, setGlobeFailed] = useState(false)
 
   const globeStations = useMemo<GlobeStation[]>(
     () =>
@@ -99,6 +108,7 @@ export default function GlobeHero({ stations, overviewById, selectedId, onSelect
       <div className="globe-stage">
         {webglOk ? (
           <GlobeErrorBoundary
+            onFailed={() => setGlobeFailed(true)}
             fallback={
               <div className="globe-loading">
                 The 3D view failed to load — the interactive map below has the same data.
@@ -153,7 +163,9 @@ export default function GlobeHero({ stations, overviewById, selectedId, onSelect
               {floodingCount} station{floodingCount > 1 ? 's' : ''} at flood stage
             </span>
           )}
-          {webglOk && <span className="globe-hint">drag to explore · ctrl + scroll to zoom</span>}
+          {webglOk && !globeFailed && (
+            <span className="globe-hint">drag to explore · ctrl + scroll to zoom</span>
+          )}
         </div>
       </div>
     </section>

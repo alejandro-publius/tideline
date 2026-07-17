@@ -136,6 +136,18 @@ def test_502_when_noaa_down_and_nothing_cached(client):
 
 
 @respx.mock
+def test_cooldown_fails_fast_when_nothing_cached(client):
+    """With no cache to fall back on, requests inside the cooldown 502
+    immediately instead of re-paying the NOAA retry cost each time."""
+    route = respx.get(NOAA_URL).mock(side_effect=httpx.ConnectError("connection refused"))
+
+    assert client.get(READINGS_URL).status_code == 502
+    assert client.get(READINGS_URL).status_code == 502
+
+    assert route.call_count == 1, "second request must fail fast without touching NOAA"
+
+
+@respx.mock
 def test_station_without_sensor_returns_empty_series_and_caches_it(client):
     """A missing sensor must be a 200 with no readings, and must not re-poll NOAA."""
     payload = {"error": {"message": "No data was found. Product not offered at this station."}}

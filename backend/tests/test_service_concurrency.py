@@ -1,15 +1,15 @@
 """The write path must be idempotent under concurrent refreshes.
 
-Two sessions (a request and the background sweep, or two parallel requests)
-can both find the same (station, product) stale, both fetch, and race the
-insert; the loser trips a unique constraint. These tests force that exact
-interleaving deterministically — the first commit raises IntegrityError the
-way a lost race does — and assert the writers recover instead of surfacing
-a 500.
+Multiple sessions (requests and the background sweep) can all find the same
+(station, product) stale, fetch in parallel, and race the insert; losers trip
+unique constraints. These tests force those interleavings deterministically —
+commits raise IntegrityError the way a lost race does — and assert the writers
+recover instead of surfacing a 500.
 """
 
 from datetime import datetime, timedelta
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app import service
@@ -21,25 +21,38 @@ def _integrity_error() -> IntegrityError:
     return IntegrityError("INSERT ...", {}, Exception("UNIQUE constraint failed"))
 
 
-def test_store_survives_losing_an_insert_race(db, monkeypatch):
-    """If the commit trips the unique constraint (a concurrent writer won),
-    _store must roll back, re-read what the winner committed, and retry."""
-    series = [(datetime(2026, 7, 9, 10, 0), 1.5), (datetime(2026, 7, 9, 10, 6), 1.6)]
+def test_store_retries_and_dedupes_against_the_winners_rows(db, monkeypatch):
+    """When the commit trips the unique constraint, _store must roll back,
+    re-read what the winner committed, and insert only the still-missing rows."""
+    ts1, ts2 = datetime(2026, 7, 9, 10, 0), datetime(2026, 7, 9, 10, 6)
+    series = [(ts1, 1.5), (ts2, 1.6)]
     real_commit = db.commit
-    calls = {"n": 0}
+    state = {"raced": False}
 
     def flaky_commit():
-        calls["n"] += 1
-        if calls["n"] == 1:
+        if not state["raced"]:
+            state["raced"] = True
+            db.rollback()  # discard the loser's pending inserts
+            # the winner lands one overlapping row between our SELECT and commit
+            db.add(Reading(station_id="9414290", product="water_level", ts=ts1, value=1.5))
+            real_commit()
             raise _integrity_error()
         real_commit()
 
     monkeypatch.setattr(db, "commit", flaky_commit)
     service._store(db, "9414290", "water_level", series)
 
-    stored = db.query(Reading).filter_by(station_id="9414290", product="water_level").count()
-    assert stored == 2
-    assert calls["n"] == 2, "the writer must retry exactly once"
+    rows = db.query(Reading).filter_by(station_id="9414290", product="water_level").all()
+    assert sorted(r.ts for r in rows) == [ts1, ts2], "no duplicates, no missing rows"
+
+
+def test_store_reraises_after_persistent_conflicts(db, monkeypatch):
+    """Retries are bounded: a pathologically racy pair surfaces the error
+    instead of looping forever."""
+    monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(_integrity_error()))
+
+    with pytest.raises(IntegrityError):
+        service._store(db, "9414290", "water_level", [(datetime(2026, 7, 9, 10, 0), 1.5)])
 
 
 def test_touch_log_survives_losing_an_insert_race(db, monkeypatch):

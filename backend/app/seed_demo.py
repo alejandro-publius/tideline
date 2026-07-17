@@ -28,7 +28,13 @@ from sqlalchemy.orm import Session
 from .database import Base, SessionLocal, engine, ensure_schema
 from .models import FetchLog, Reading, Station
 from .seed import seed_stations
-from .service import MAX_LOOKBACK_HOURS, OVERVIEW_PRODUCTS, PREDICTIONS_LOOKAHEAD_HOURS, utcnow
+from .service import (
+    MAX_LOOKBACK_HOURS,
+    OVERVIEW_PRODUCTS,
+    PREDICTIONS_LOOKAHEAD_HOURS,
+    _ttl_for,
+    utcnow,
+)
 
 STEP = timedelta(minutes=6)  # NOAA's native observation cadence
 PRODUCTS = (*OVERVIEW_PRODUCTS, "water_temperature")
@@ -73,7 +79,9 @@ def seed_demo(db: Session, days: int = 14, seed: int = 1234) -> int:
     now = utcnow().replace(second=0, microsecond=0)
     now -= timedelta(minutes=now.minute % 6)  # align to the 6-minute grid
     start = now - timedelta(hours=MAX_LOOKBACK_HOURS) - timedelta(days=days)
-    pred_end = now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS)
+    # Mirror _fetch_window's over-fetch: seeded predictions must cover the full
+    # look-ahead for any request made while the seeded fetch log is fresh.
+    pred_end = now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS) + _ttl_for("predictions")
 
     rng = random.Random(seed)
     written = 0

@@ -21,7 +21,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 
 ## Features
 
-- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and color are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, scroll to zoom, click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honors `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
+- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and color are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, ctrl + scroll to zoom (a hero must never hijack page scrolling), click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honors `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
 - **National surge overview** — map markers turn red/blue when a station runs beyond ±0.15 m of its predicted tide, so one glance shows which coast is anomalous right now
 - **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker or use the dropdown (the map pans to off-screen picks)
 - **Observed vs. predicted overlay chart** with a "now" marker, so you can see the upcoming tide as well as the last few days
@@ -173,7 +173,7 @@ This populates the database and marks the cache fresh, so every endpoint serves 
 ### Tests
 
 ```bash
-cd backend && pytest -v      # 60 tests (or: make test-backend)
+cd backend && pytest -v      # 62 tests (or: make test-backend)
 cd frontend && npm test      # 39 tests (or: make test-frontend)
 ```
 

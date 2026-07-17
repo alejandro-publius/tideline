@@ -49,12 +49,19 @@ try {
     // chunk download and show only the loading banner. Headless environments
     // without WebGL never mount the canvas — fall through after a short wait
     // rather than failing the whole run.
-    await page
+    const globeReady = await page
       .waitForSelector('.globe-canvas canvas', { timeout: 15_000 })
-      .catch(() => console.warn(`${file}: globe canvas never appeared (no WebGL?)`))
+      .then(() => true)
+      .catch(() => (console.warn(`${file}: globe canvas never appeared (no WebGL?)`), false))
     await page.waitForTimeout(SETTLE_MS)
     const path = resolve(OUT_DIR, file)
     if (clip) {
+      // don't overwrite the committed globe shot with a fallback banner
+      if (!globeReady) {
+        console.warn(`${file}: skipped — globe never rendered`)
+        await context.close()
+        continue
+      }
       await page.locator(clip).screenshot({ path })
     } else {
       await page.screenshot({ path })
