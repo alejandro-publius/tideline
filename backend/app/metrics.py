@@ -68,6 +68,11 @@ RATE_LIMITED = _counter(
     "tideline_rate_limited_total",
     "Requests rejected with 429 by the rate limiter.",
 )
+ANOMALY_EVENTS = _counter(
+    "tideline_anomaly_events_total",
+    "Reading events processed by the detector, by verdict.",
+    ("result",),  # detected | clear
+)
 READINGS_PUBLISHED = _counter(
     "tideline_readings_published_total",
     "Readings announced on the event path, by publish outcome.",

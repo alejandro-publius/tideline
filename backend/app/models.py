@@ -42,6 +42,29 @@ class Reading(Base):
     station: Mapped[Station] = relationship(back_populates="readings")
 
 
+class Anomaly(Base):
+    """A reading the detector judged notable, found on the event path (ADR 0007).
+
+    The natural key is (station_id, product, ts) — the reading it describes —
+    rather than an arrival counter. A given reading has exactly one verdict, so
+    seeing it twice must not produce two rows. That matters because delivery is
+    at-least-once: a consumer that dies after writing but before acknowledging
+    will be handed the same message again on restart.
+    """
+
+    __tablename__ = "anomalies"
+    __table_args__ = (UniqueConstraint("station_id", "product", "ts"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    station_id: Mapped[str] = mapped_column(ForeignKey("stations.id"), index=True)
+    product: Mapped[str] = mapped_column(String(32))
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    value: Mapped[float] = mapped_column(Float)
+    # Which NWS threshold the observation crossed: minor | moderate | major.
+    severity: Mapped[str] = mapped_column(String(16))
+    detected_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class FetchLog(Base):
     """When each (station, product) series was last refreshed from NOAA."""
 
