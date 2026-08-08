@@ -64,11 +64,20 @@ revisit.
 
 - Anomalies are detected **when they happen**, not when someone looks, and the
   detector's uptime is decoupled from the API's.
-- The system now has a second process to run and a broker to operate. `make dev`
-  and the compose setup have to start both, and "is the consumer alive" becomes a
-  thing that can be false while the API looks perfectly healthy — so consumer lag
-  and queue depth are exported as metrics (see
+- The system now has a second process to run and a broker to operate, and "is the
+  consumer alive" becomes a thing that can be false while the API looks perfectly
+  healthy. The API counts publish outcomes (`tideline_readings_published_total`),
+  so a broker that has gone away is visible from `/api/metrics` — but the detector
+  exposes no HTTP endpoint of its own, so its own counters are not scrapeable and
+  consumer lag is not currently exported at all. Queue depth is visible only from
+  RabbitMQ's management API. Closing that gap means giving the detector a health
+  endpoint; until then, monitoring of the consumer is genuinely incomplete and
+  should not be assumed (see
   [ADR 0004](0004-in-process-rate-limiting-and-metrics.md)).
+- A topic exchange discards messages that no queue is bound to, so readings
+  published before the detector has ever run are lost rather than buffered. Once
+  the queue exists it survives restarts and the ordering stops mattering, but the
+  very first start is not order-independent.
 - At-least-once delivery means duplicate processing is **normal**, not exceptional.
   Every consumer added later inherits the obligation to be idempotent; that is a
   standing constraint, not a one-off implementation detail.
