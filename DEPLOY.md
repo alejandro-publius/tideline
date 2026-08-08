@@ -5,7 +5,8 @@ image serves both the API and the built frontend from the same origin. The
 **split** deploy hosts the frontend on a static/edge platform and the backend
 separately — useful if you want the frontend on a CDN.
 
-> Live URL: `TODO (human):` paste the deployed URL here once it's live.
+Both shapes deploy the API alone. The anomaly detector is a second process and
+needs a broker; it is optional and covered in its own section below.
 
 ---
 
@@ -59,6 +60,46 @@ The frontend reads its API base from the `VITE_API_BASE` build-time variable
 
 ---
 
+## Option C — Adding the anomaly detector
+
+The event path (see [ADR 0007](docs/adr/0007-event-driven-anomaly-detection.md))
+is off unless `TIDELINE_BROKER_URL` is set, so Options A and B deploy exactly as
+they always did. Turning it on adds two things: a broker, and a second
+long-running process.
+
+1. **Get a broker.** Render has no managed RabbitMQ; a hosted instance
+   ([CloudAMQP](https://www.cloudamqp.com) has a free plan) or your own is
+   fine. What you need out of it is an `amqp://…` or `amqps://…` URL.
+2. **Use a shared database.** The API writes readings and the detector writes
+   anomalies, so both must point at the *same* `TIDELINE_DATABASE_URL` — that
+   means Postgres, not the container's ephemeral SQLite file.
+3. **Add a Background Worker** on Render: same repo, same Docker image, with the
+   start command overridden to `python -m app.detector`. `render.yaml` defines
+   only the web service, so add the worker in the dashboard (or extend the
+   Blueprint yourself).
+4. **Set `TIDELINE_BROKER_URL` on both services.** The API is the publisher and
+   the worker is the consumer; if only one has it, nothing flows.
+
+Each process declares its half of the topology at startup — the API the
+exchange, the worker its queue and dead-letter binding — so there is nothing to
+provision by hand and no required start order. Readings published before the
+worker has ever run are discarded, since a topic exchange drops messages no
+queue is bound to; after that the queue is durable and buffers across worker
+restarts.
+
+Verify:
+
+```bash
+curl -sf https://<your-app>.onrender.com/api/anomalies      # {"anomalies":[…]}
+curl -s  https://<your-app>.onrender.com/api/metrics | grep readings_published
+```
+
+`tideline_readings_published_total{result="failed"}` climbing means the API
+cannot reach the broker. That is a degradation, not an outage — reads carry on
+and no anomaly rows are written until it can.
+
+---
+
 ## Environment variables
 
 Full list with defaults is in [`.env.example`](.env.example). The ones that
@@ -71,6 +112,8 @@ usually matter for a deploy:
 | `TIDELINE_STATIC_DIR` | Where to serve the built SPA from (set by the Dockerfile) |
 | `TIDELINE_RATE_LIMIT_PER_MINUTE` | Per-client request budget (0 disables) |
 | `TIDELINE_HISTORY_REFRESH_MINUTES` | Background sweep that accumulates surge history |
+| `TIDELINE_BROKER_URL` | AMQP URL for the event path; unset disables publishing and the detector (Option C) |
+| `TIDELINE_SURGE_THRESHOLD_M` | Metres from the prediction before the detector calls it surge (default `0.15`) |
 
 ---
 
@@ -80,7 +123,9 @@ usually matter for a deploy:
 - [ ] `/docs` renders the interactive API
 - [ ] The map loads and markers show colors (needs at least one NOAA fetch, or
       seed the database — see below)
-- [ ] `TODO (human):` capture a real screenshot/GIF of the live app for the README
+- [ ] The README screenshots still match what the deployed UI looks like
+- [ ] If the detector is deployed (Option C): `/api/anomalies` responds, and
+      `tideline_readings_published_total{result="failed"}` is not climbing
 
 ### Seeding a demo database
 

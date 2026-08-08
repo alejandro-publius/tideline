@@ -2,7 +2,11 @@
 #   backend:  python -m venv backend/.venv && backend/.venv/bin/pip install -e "backend[dev]"
 #   frontend: npm install --prefix frontend
 
-.PHONY: help setup backend frontend mcp dev test test-backend test-frontend typecheck cov lint format
+.PHONY: help setup backend frontend mcp detector dev dev-broker test test-backend test-frontend typecheck cov lint format
+
+# Local RabbitMQ for the event path (brew install rabbitmq && brew services start rabbitmq).
+# Override to point the dev targets at a different broker.
+BROKER_URL ?= amqp://guest:guest@localhost:5672/
 
 help: ## list available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-14s %s\n", $$1, $$2}'
@@ -21,7 +25,16 @@ frontend: ## run the Vite dev server on localhost:5173
 mcp: ## run the MCP server (Tideline as agent tools, over stdio)
 	cd backend && .venv/bin/python -m app.mcp_server
 
+detector: ## run the anomaly detector (needs a running broker; see BROKER_URL)
+	cd backend && TIDELINE_BROKER_URL=$(BROKER_URL) .venv/bin/python -m app.detector
+
 dev: backend ## run the API (start `make frontend` alongside in a second terminal)
+
+dev-broker: ## run the API and the detector together against a local RabbitMQ
+	cd backend && export TIDELINE_BROKER_URL=$(BROKER_URL); \
+	.venv/bin/python -m app.detector & detector=$$!; \
+	trap "kill $$detector 2>/dev/null" EXIT; \
+	.venv/bin/uvicorn app.main:app --reload
 
 test: test-backend test-frontend ## run both test suites
 
