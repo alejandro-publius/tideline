@@ -132,8 +132,11 @@ class ReadingPublisher:
         try:
             if self._connection is not None and self._connection.is_open:
                 self._connection.close()
-        except Exception:  # noqa: BLE001 - teardown must not mask the original failure
-            pass
+        except Exception:
+            # Teardown must not mask whatever failure led us here, and the
+            # connection is being discarded regardless, so this is logged at
+            # debug rather than raised or swallowed silently.
+            logger.debug("error closing broker connection during reset", exc_info=True)
         self._connection = None
         self._channel = None
 

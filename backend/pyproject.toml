@@ -39,6 +39,18 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]
+ignore = [
+    # Naive datetimes are the documented architecture, not an oversight: every
+    # datetime inside the system is naive UTC, and awareness exists only at the
+    # serialization boundary where an explicit Z is appended. Enforcing aware
+    # datetimes internally would invert that. See docs/adr/0003.
+    "DTZ001",
+    "DTZ007",
+    # FastAPI's dependency injection is expressed as `= Depends(...)` in the
+    # signature, which is precisely the mutable-default shape B008 exists to
+    # catch. It is the framework's documented idiom and evaluated per request.
+    "B008",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

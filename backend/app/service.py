@@ -10,7 +10,7 @@ unreachable, previously cached data is served with source="stale".
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import func, select
@@ -44,7 +44,7 @@ class SeriesResult:
 
 def utcnow() -> datetime:
     """Naive UTC now; all timestamps in the system are naive UTC."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _ttl_for(product: str) -> timedelta:
