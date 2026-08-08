@@ -71,7 +71,8 @@ RATE_LIMITED = _counter(
 ANOMALY_EVENTS = _counter(
     "tideline_anomaly_events_total",
     "Reading events processed by the detector, by verdict.",
-    ("result",),  # flood | surge | clear | duplicate (redelivery)
+    # flood | surge | clear | duplicate (redelivery) | dead_lettered | requeued
+    ("result",),
 )
 READINGS_PUBLISHED = _counter(
     "tideline_readings_published_total",

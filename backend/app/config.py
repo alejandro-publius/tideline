@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # How far an observation may sit from its astronomical prediction before the
     # detector calls it surge, in metres. Mirrors SURGE_THRESHOLD in the frontend.
     surge_threshold_m: float = 0.15
+    # Where messages go when the detector judges them permanently unprocessable,
+    # so one bad payload cannot block the readings behind it.
+    broker_dead_letter_exchange: str = "tideline.readings.dlx"
 
     model_config = {"env_prefix": "TIDELINE_"}
 

@@ -41,11 +41,23 @@ QUEUE_NAME = "anomaly.detector"
 # Bind to every product; only water_level currently yields a verdict, but a new
 # product starts flowing here without a broker change.
 BINDING_KEY = "reading.*"
+# Messages the detector can never process are parked here for a human to look at.
+DEAD_LETTER_QUEUE = "anomaly.detector.dead"
 
 # How many unacknowledged messages the broker will hand us at once. Without this
 # RabbitMQ pushes the entire queue at a single consumer, which defeats running a
 # second one and lets one slow consumer hoard the backlog.
 PREFETCH_COUNT = 16
+
+
+class Unprocessable(Exception):
+    """The message will never succeed, however many times it is redelivered.
+
+    Distinct from an ordinary failure. If the database is briefly unreachable the
+    right response is to let the message come back and try again; if the payload
+    is malformed, retrying is an infinite loop that also blocks everything queued
+    behind it. Only this exception sends a message to the dead-letter queue.
+    """
 
 
 @dataclass(frozen=True)
@@ -172,13 +184,31 @@ def record(
     return len(new)
 
 
+def parse(body: bytes) -> tuple[str, str, datetime, float]:
+    """Read one event off the wire.
+
+    Every failure here is a property of the bytes themselves, so no amount of
+    retrying will help — they are raised as Unprocessable and dead-lettered.
+    """
+    try:
+        payload = json.loads(body)
+        return (
+            str(payload["station_id"]),
+            str(payload["product"]),
+            datetime.fromisoformat(payload["ts"]),
+            float(payload["value"]),
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise Unprocessable(f"malformed reading event: {exc}") from exc
+
+
 def handle_message(db: Session, body: bytes) -> None:
-    """Process one reading event. Raising here means the message is not acked."""
-    payload = json.loads(body)
-    station_id = payload["station_id"]
-    product = payload["product"]
-    ts = datetime.fromisoformat(payload["ts"])
-    value = float(payload["value"])
+    """Process one reading event.
+
+    Raising Unprocessable means the message is dead-lettered. Any other exception
+    means the message is left unacknowledged and will be retried.
+    """
+    station_id, product, ts, value = parse(body)
 
     verdicts = evaluate(db, station_id, product, ts, value)
     if not verdicts:
@@ -218,13 +248,47 @@ def run() -> None:
     channel = connection.channel()
     # Both sides declare the topology, so neither has to start first.
     channel.exchange_declare(settings.broker_exchange, exchange_type="topic", durable=True)
-    channel.queue_declare(QUEUE_NAME, durable=True)
+
+    # Rejected messages are republished to the dead-letter exchange, which fans
+    # them into one holding queue. Note that queue arguments are immutable once a
+    # queue exists: adding dead-lettering to a live deployment means draining and
+    # redeclaring, not editing in place.
+    channel.exchange_declare(
+        settings.broker_dead_letter_exchange, exchange_type="fanout", durable=True
+    )
+    channel.queue_declare(DEAD_LETTER_QUEUE, durable=True)
+    channel.queue_bind(DEAD_LETTER_QUEUE, settings.broker_dead_letter_exchange)
+
+    channel.queue_declare(
+        QUEUE_NAME,
+        durable=True,
+        arguments={"x-dead-letter-exchange": settings.broker_dead_letter_exchange},
+    )
     channel.queue_bind(QUEUE_NAME, settings.broker_exchange, routing_key=BINDING_KEY)
     channel.basic_qos(prefetch_count=PREFETCH_COUNT)
 
     def on_message(ch, method, properties, body: bytes) -> None:
-        with Session(engine) as db:
-            handle_message(db, body)
+        try:
+            with Session(engine) as db:
+                handle_message(db, body)
+        except Unprocessable as exc:
+            # requeue=False is what routes this to the dead-letter exchange.
+            # Retrying would loop forever and block everything behind it.
+            logger.error(
+                "dead-lettering unprocessable message",
+                extra={"error": str(exc), "body": body[:200].decode(errors="replace")},
+            )
+            metrics.ANOMALY_EVENTS.inc(result="dead_lettered")
+            ch.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
+            return
+        except Exception:
+            # Anything else is assumed transient — a database blip, say. Return
+            # it to the queue so a later attempt, or another consumer, can try.
+            logger.exception("transient failure, returning message to the queue")
+            metrics.ANOMALY_EVENTS.inc(result="requeued")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            return
+
         # Acknowledged only now, after the work is committed. Ack earlier and a
         # crash in between would lose the reading silently.
         ch.basic_ack(delivery_tag=method.delivery_tag)

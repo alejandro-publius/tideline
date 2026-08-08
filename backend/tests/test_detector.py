@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import Base, make_engine
-from app.detector import evaluate, handle_message
+from app.detector import Unprocessable, evaluate, handle_message
 from app.models import Anomaly, Reading, Station
 
 
@@ -209,3 +209,38 @@ def test_record_reports_how_many_rows_it_wrote(db: Session) -> None:
     verdict = [Verdict(kind="flood", severity="minor")]
     assert record(db, "9414290", "water_level", TS, 1.2, verdict) == 1
     assert record(db, "9414290", "water_level", TS, 1.2, verdict) == 0
+
+
+# --- unprocessable messages: dead-lettered rather than retried forever ---
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        (b"{not json at all", "not JSON"),
+        (b'{"station_id": "9414290"}', "missing fields"),
+        (b'{"station_id":"x","product":"water_level","ts":"not-a-date","value":1.0}', "bad ts"),
+        (b'{"station_id":"x","product":"water_level","ts":"2026-08-08T12:00:00","value":"NaN?"}',
+         "non-numeric value"),
+        (b"", "empty body"),
+    ],
+)
+def test_malformed_payloads_are_unprocessable(db: Session, body: bytes, why: str) -> None:
+    """These can never succeed, so they must be distinguishable from a retryable
+    failure — otherwise the consumer loops on them and blocks the queue."""
+    with pytest.raises(Unprocessable):
+        handle_message(db, body)
+
+
+def test_unprocessable_is_not_raised_for_a_valid_message(db: Session) -> None:
+    handle_message(db, _event(1.4))  # must not raise
+
+    assert len(db.scalars(select(Anomaly)).all()) == 1
+
+
+def test_a_reading_for_an_unknown_station_is_not_dead_lettered(db: Session) -> None:
+    """Not the message's fault. The station may simply not be seeded yet, so
+    retrying could legitimately succeed later — this must not be discarded."""
+    handle_message(db, _event(1.4, station="not-seeded-yet"))
+
+    assert db.scalars(select(Anomaly)).all() == []
