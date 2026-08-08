@@ -1,10 +1,11 @@
 """Consuming side of the telemetry event path (see ADR 0007).
 
 Runs as its own process: `python -m app.detector`. It subscribes to reading
-events, decides whether each one crossed a flood threshold, and records the ones
-that did. Nothing here is on the HTTP request path, which is the entire point —
-the API keeps serving whether or not this process is alive, and this process
-keeps working through an API deploy.
+events and judges each one two ways — against the station's absolute flood
+thresholds, and against what the tide tables predicted for that moment — then
+records whatever it finds. Nothing here is on the HTTP request path, which is
+the entire point: the API keeps serving whether or not this process is alive,
+and this process keeps working through an API deploy.
 
 Delivery is at-least-once. A message is acknowledged only after its work is
 committed, so a crash mid-message means the broker hands that message back on
@@ -17,18 +18,20 @@ import json
 import logging
 import signal
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from types import FrameType
 
 import pika
 from pika.exceptions import AMQPError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import metrics
 from .config import get_settings
 from .database import make_engine
 from .logging_config import configure_logging
-from .models import Anomaly, Station
+from .models import Anomaly, Reading, Station
 from .service import flood_stage, utcnow
 
 logger = logging.getLogger("tideline.detector")
@@ -44,32 +47,92 @@ BINDING_KEY = "reading.*"
 PREFETCH_COUNT = 16
 
 
-def evaluate(db: Session, station_id: str, product: str, ts: datetime, value: float) -> str | None:
-    """Return the severity this reading crossed, or None if it is unremarkable."""
-    if product != "water_level":
+@dataclass(frozen=True)
+class Verdict:
+    """One judgement about a reading. `residual` is set only for surge."""
+
+    kind: str
+    severity: str
+    residual: float | None = None
+
+
+def evaluate_flood(station: Station, value: float) -> Verdict | None:
+    """Absolute check: did the level cross a published NWS flood threshold?"""
+    severity = flood_stage(value, station)
+    return None if severity is None else Verdict(kind="flood", severity=severity)
+
+
+def evaluate_surge(
+    db: Session, station_id: str, ts: datetime, value: float, threshold: float
+) -> Verdict | None:
+    """Relative check: is the level far from what the tide tables predicted?
+
+    Tides are astronomy and therefore predictable years ahead, so the residual
+    (observed - predicted) isolates whatever the tide tables cannot see — storm
+    surge, wind setup, pressure anomalies. This catches events an absolute
+    threshold cannot: the same 1.4 m is unremarkable at high tide and alarming
+    at low tide.
+
+    Returns None when there is no prediction for that timestamp; a missing
+    prediction is an absence of evidence, not evidence of calm.
+    """
+    predicted = db.scalar(
+        select(Reading.value).where(
+            Reading.station_id == station_id,
+            Reading.product == "predictions",
+            Reading.ts == ts,
+        )
+    )
+    if predicted is None:
         return None
+
+    residual = round(value - predicted, 3)
+    if abs(residual) < threshold:
+        return None
+    return Verdict(
+        kind="surge",
+        severity="above" if residual > 0 else "below",
+        residual=residual,
+    )
+
+
+def evaluate(
+    db: Session, station_id: str, product: str, ts: datetime, value: float
+) -> list[Verdict]:
+    """Every judgement that applies to this reading. May be empty."""
+    if product != "water_level":
+        return []
     station = db.get(Station, station_id)
     if station is None:
         # A reading for a station we do not know about is not an error worth
         # retrying — the detector simply has no thresholds to judge it against.
         logger.warning("reading for unknown station", extra={"station": station_id})
-        return None
-    return flood_stage(value, station)
+        return []
+
+    threshold = get_settings().surge_threshold_m
+    candidates = [
+        evaluate_flood(station, value),
+        evaluate_surge(db, station_id, ts, value, threshold),
+    ]
+    return [verdict for verdict in candidates if verdict is not None]
 
 
 def record(
-    db: Session, station_id: str, product: str, ts: datetime, value: float, severity: str
+    db: Session, station_id: str, product: str, ts: datetime, value: float, verdicts: list[Verdict]
 ) -> None:
-    """Persist one anomaly."""
-    db.add(
+    """Persist the verdicts for one reading."""
+    db.add_all(
         Anomaly(
             station_id=station_id,
             product=product,
             ts=ts,
             value=value,
-            severity=severity,
+            kind=verdict.kind,
+            severity=verdict.severity,
+            residual=verdict.residual,
             detected_at=utcnow(),
         )
+        for verdict in verdicts
     )
     db.commit()
 
@@ -82,16 +145,21 @@ def handle_message(db: Session, body: bytes) -> None:
     ts = datetime.fromisoformat(payload["ts"])
     value = float(payload["value"])
 
-    severity = evaluate(db, station_id, product, ts, value)
-    if severity is None:
+    verdicts = evaluate(db, station_id, product, ts, value)
+    if not verdicts:
         metrics.ANOMALY_EVENTS.inc(result="clear")
         return
 
-    record(db, station_id, product, ts, value, severity)
-    metrics.ANOMALY_EVENTS.inc(result="detected")
+    record(db, station_id, product, ts, value, verdicts)
+    for verdict in verdicts:
+        metrics.ANOMALY_EVENTS.inc(result=verdict.kind)
     logger.info(
         "anomaly recorded",
-        extra={"station": station_id, "severity": severity, "value": value},
+        extra={
+            "station": station_id,
+            "value": value,
+            "verdicts": ",".join(f"{v.kind}:{v.severity}" for v in verdicts),
+        },
     )
 
 

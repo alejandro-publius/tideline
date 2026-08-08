@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     broker_exchange: str = "tideline.readings"
     # How long a publish may block before we give up and carry on serving reads.
     broker_publish_timeout_seconds: float = 2.0
+    # How far an observation may sit from its astronomical prediction before the
+    # detector calls it surge, in metres. Mirrors SURGE_THRESHOLD in the frontend.
+    surge_threshold_m: float = 0.15
 
     model_config = {"env_prefix": "TIDELINE_"}
 
