@@ -10,6 +10,9 @@
   --border: rgba(11, 11, 11, 0.1);
   --series-1: #2a78d6;
   --series-2: #1baf7a;
+  /* diverging surge pair — mirrors ChartTheme.surgeAbove / surgeBelow */
+  --surge-above: #e34948;
+  --surge-below: var(--series-1);
   --status-good: #0ca30c;
   --status-serious: #ec835a;
   --accent: #2a78d6;
@@ -30,6 +33,7 @@
     --border: rgba(255, 255, 255, 0.1);
     --series-1: #3987e5;
     --series-2: #199e70;
+    --surge-above: #e66767;
     --accent: #3987e5;
     --focus-ring: rgba(57, 135, 229, 0.55);
     --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -425,6 +429,87 @@ a.panel-sub:hover {
   font-weight: 600;
 }
 
+/* Anomaly feed */
+.anomaly-card {
+  grid-column: 1 / -1;
+  padding: 14px 16px;
+}
+
+.anomaly-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.anomaly-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--grid);
+  font-size: 13px;
+}
+
+.anomaly-row:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+.anomaly-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 132px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--page);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Color reinforces the mark only; the label carries the meaning on its own. */
+.anomaly-mark {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.anomaly-tag--moderate .anomaly-mark {
+  color: var(--status-serious);
+}
+
+.anomaly-tag--major .anomaly-mark,
+.anomaly-tag--above .anomaly-mark {
+  color: var(--surge-above);
+}
+
+.anomaly-tag--below .anomaly-mark {
+  color: var(--surge-below);
+}
+
+.anomaly-station {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.anomaly-detail {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.anomaly-ago {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Source badge */
 .badge {
   margin-left: auto;
@@ -498,6 +583,15 @@ a.panel-sub:hover {
   text-align: center;
   color: var(--muted);
   font-size: 14px;
+}
+
+/* Second line of an empty state: says why it's empty, so a quiet system
+   doesn't read as a broken one. */
+.placeholder-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--baseline);
 }
 
 .error-card {

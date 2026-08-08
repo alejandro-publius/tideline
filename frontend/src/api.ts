@@ -1,4 +1,4 @@
-import type { Product, Series, Station, StationOverview } from './types'
+import type { Anomaly, Product, Series, Station, StationOverview } from './types'
 
 // Same-origin in production (the backend serves the built frontend);
 // the Vite dev server proxies /api instead.
@@ -42,3 +42,8 @@ export const fetchReadings = (
 // Lookback follows the selected range; the backend caps lookahead at 48h
 export const fetchPredictions = (stationId: string, hours: number, signal?: AbortSignal) =>
   getJson<Series>(`/api/stations/${stationId}/predictions?hours=${hours}`, signal)
+
+/** Anomalies the detector has already recorded. A pure read: if the detector is
+ *  down this goes stale rather than being silently recomputed here. */
+export const fetchAnomalies = (limit = 20, signal?: AbortSignal) =>
+  getJson<{ anomalies: Anomaly[] }>(`/api/anomalies?limit=${limit}`, signal)

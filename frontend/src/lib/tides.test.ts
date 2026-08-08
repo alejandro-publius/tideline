@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Reading } from '../types'
 import {
+  fmtAgo,
   fmtDuration,
   fmtLevel,
   fmtTemp,
@@ -147,5 +148,24 @@ describe('fmtDuration', () => {
 
   it('clamps negatives to zero', () => {
     expect(fmtDuration(-5000)).toBe('in 0 min')
+  })
+})
+
+describe('fmtAgo', () => {
+  it('formats sub-hour ages in minutes', () => {
+    expect(fmtAgo(12 * 60_000)).toBe('12m ago')
+  })
+
+  it('formats hours with the leftover minutes', () => {
+    expect(fmtAgo(3 * HOUR + 5 * 60_000)).toBe('3h 5m ago')
+  })
+
+  it('rolls over to days past 24 hours', () => {
+    expect(fmtAgo(50 * HOUR)).toBe('2d 2h ago')
+  })
+
+  it('collapses anything under a minute (and clock skew) to "just now"', () => {
+    expect(fmtAgo(20_000)).toBe('just now')
+    expect(fmtAgo(-5000)).toBe('just now')
   })
 })
