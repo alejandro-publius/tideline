@@ -25,6 +25,7 @@ from types import FrameType
 import pika
 from pika.exceptions import AMQPError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import metrics
@@ -119,8 +120,30 @@ def evaluate(
 
 def record(
     db: Session, station_id: str, product: str, ts: datetime, value: float, verdicts: list[Verdict]
-) -> None:
-    """Persist the verdicts for one reading."""
+) -> int:
+    """Persist the verdicts for one reading, skipping any already recorded.
+
+    This has to be idempotent, because at-least-once delivery guarantees we will
+    sometimes see the same reading twice: a consumer that commits its work and
+    then dies before acknowledging is handed that message again on restart.
+
+    Verdicts are a pure function of the reading, so a second look reaches the
+    same conclusion and there is nothing to update — the existing row is already
+    correct. Returns the number of rows actually written.
+    """
+    already_recorded = set(
+        db.scalars(
+            select(Anomaly.kind).where(
+                Anomaly.station_id == station_id,
+                Anomaly.product == product,
+                Anomaly.ts == ts,
+            )
+        )
+    )
+    new = [verdict for verdict in verdicts if verdict.kind not in already_recorded]
+    if not new:
+        return 0
+
     db.add_all(
         Anomaly(
             station_id=station_id,
@@ -132,9 +155,21 @@ def record(
             residual=verdict.residual,
             detected_at=utcnow(),
         )
-        for verdict in verdicts
+        for verdict in new
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The check above is not atomic, so two consumers handling the same
+        # redelivered reading can both pass it. The unique constraint is the real
+        # guarantee; losing that race just means the row already exists.
+        db.rollback()
+        logger.debug(
+            "anomaly already recorded by another consumer",
+            extra={"station": station_id, "ts": ts.isoformat()},
+        )
+        return 0
+    return len(new)
 
 
 def handle_message(db: Session, body: bytes) -> None:
@@ -150,7 +185,13 @@ def handle_message(db: Session, body: bytes) -> None:
         metrics.ANOMALY_EVENTS.inc(result="clear")
         return
 
-    record(db, station_id, product, ts, value, verdicts)
+    written = record(db, station_id, product, ts, value, verdicts)
+    if not written:
+        # A redelivery of something already handled. Normal under at-least-once,
+        # worth counting so a spike in redeliveries is visible.
+        metrics.ANOMALY_EVENTS.inc(result="duplicate")
+        return
+
     for verdict in verdicts:
         metrics.ANOMALY_EVENTS.inc(result=verdict.kind)
     logger.info(

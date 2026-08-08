@@ -159,3 +159,53 @@ def test_surge_catches_what_an_absolute_threshold_misses(db: Session) -> None:
 
     kinds = {v.kind for v in evaluate(db, "9414290", "water_level", TS, 0.90)}
     assert kinds == {"surge"}
+
+
+# --- idempotency: the same reading may legitimately arrive more than once ---
+
+
+def test_reprocessing_the_same_reading_is_a_no_op(db: Session) -> None:
+    """At-least-once delivery means redelivery is normal, not exceptional.
+
+    A consumer that commits its work and then dies before acknowledging will be
+    handed the same message again on restart. That must not raise, and must not
+    produce a second row.
+    """
+    for _ in range(5):
+        handle_message(db, _event(1.4))
+
+    rows = db.scalars(select(Anomaly)).all()
+    assert len(rows) == 1
+    assert rows[0].severity == "moderate"
+
+
+def test_redelivery_is_idempotent_across_both_verdict_kinds(db: Session) -> None:
+    _predict(db, 0.50)
+
+    handle_message(db, _event(1.4))
+    handle_message(db, _event(1.4))
+
+    assert sorted(r.kind for r in db.scalars(select(Anomaly)).all()) == ["flood", "surge"]
+
+
+def test_a_partly_recorded_reading_gains_only_the_missing_verdict(db: Session) -> None:
+    """A crash between the two writes must be recoverable on redelivery.
+
+    First pass sees no prediction, so records flood only. The prediction lands,
+    the message is redelivered, and surge is added without duplicating flood.
+    """
+    handle_message(db, _event(1.4))
+    assert [r.kind for r in db.scalars(select(Anomaly)).all()] == ["flood"]
+
+    _predict(db, 0.50)
+    handle_message(db, _event(1.4))
+
+    assert sorted(r.kind for r in db.scalars(select(Anomaly)).all()) == ["flood", "surge"]
+
+
+def test_record_reports_how_many_rows_it_wrote(db: Session) -> None:
+    from app.detector import Verdict, record
+
+    verdict = [Verdict(kind="flood", severity="minor")]
+    assert record(db, "9414290", "water_level", TS, 1.2, verdict) == 1
+    assert record(db, "9414290", "water_level", TS, 1.2, verdict) == 0
