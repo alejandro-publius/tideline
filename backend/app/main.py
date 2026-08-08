@@ -16,7 +16,7 @@ from .database import Base, SessionLocal, engine, ensure_schema
 from .logging_config import configure_logging
 from .noaa import make_noaa_client
 from .ratelimit import RateLimiter, RateLimitMiddleware
-from .routers import overview, stations
+from .routers import anomalies, overview, stations
 from .seed import seed_stations
 from .service import get_overview
 
@@ -81,6 +81,7 @@ app.add_middleware(metrics.MetricsMiddleware)
 
 app.include_router(stations.router)
 app.include_router(overview.router)
+app.include_router(anomalies.router)
 
 
 @app.get("/api/healthz")

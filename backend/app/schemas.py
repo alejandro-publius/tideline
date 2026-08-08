@@ -62,6 +62,29 @@ class DailySurgeOut(BaseModel):
     samples: int
 
 
+class AnomalyOut(BaseModel):
+    """One anomaly the detector recorded off the event path (ADR 0007)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    station_id: str
+    station_name: str
+    ts: datetime
+    value: float
+    kind: Literal["flood", "surge"]
+    severity: str  # flood: minor|moderate|major. surge: above|below.
+    residual: float | None
+    detected_at: datetime
+
+    @field_serializer("ts", "detected_at")
+    def serialize_ts(self, ts: datetime) -> str:
+        return _iso_utc(ts)
+
+
+class AnomaliesOut(BaseModel):
+    anomalies: list[AnomalyOut]
+
+
 class SeriesOut(BaseModel):
     station_id: str
     product: str

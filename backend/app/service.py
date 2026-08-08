@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, aliased
 from . import metrics
 from .broker import ReadingEvent, get_publisher
 from .config import get_settings
-from .models import FetchLog, Reading, Station
+from .models import Anomaly, FetchLog, Reading, Station
 from .noaa import NoaaClient, NoaaError
 
 logger = logging.getLogger("tideline.service")
@@ -338,3 +338,52 @@ def _touch_log(
         log.fetched_at = now
     db.commit()
     return log
+
+
+@dataclass
+class AnomalyRow:
+    """An anomaly joined to its station's display name."""
+
+    station_id: str
+    station_name: str
+    ts: datetime
+    value: float
+    kind: str
+    severity: str
+    residual: float | None
+    detected_at: datetime
+
+
+def recent_anomalies(
+    db: Session, limit: int = 50, station_id: str | None = None, kind: str | None = None
+) -> list[AnomalyRow]:
+    """Most recent anomalies the detector recorded, newest first.
+
+    Reads only what the detector already persisted — no NOAA calls, no
+    recomputation. If the detector is down this returns the last thing it knew,
+    which is the honest answer rather than a silently recomputed one.
+    """
+    query = (
+        select(Anomaly, Station.name)
+        .join(Station, Station.id == Anomaly.station_id)
+        .order_by(Anomaly.ts.desc())
+        .limit(limit)
+    )
+    if station_id is not None:
+        query = query.where(Anomaly.station_id == station_id)
+    if kind is not None:
+        query = query.where(Anomaly.kind == kind)
+
+    return [
+        AnomalyRow(
+            station_id=anomaly.station_id,
+            station_name=station_name,
+            ts=anomaly.ts,
+            value=anomaly.value,
+            kind=anomaly.kind,
+            severity=anomaly.severity,
+            residual=anomaly.residual,
+            detected_at=anomaly.detected_at,
+        )
+        for anomaly, station_name in db.execute(query).all()
+    ]
