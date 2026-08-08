@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings==2.14.2",
     "httpx==0.28.1",
     "mcp==1.28.1",  # Model Context Protocol server (app/mcp_server.py)
+    "pika==1.3.2",  # RabbitMQ client for the telemetry event path (ADR 0007)
 ]
 
 [project.optional-dependencies]
@@ -57,3 +58,9 @@ python_version = "3.11"
 files = ["app"]
 warn_redundant_casts = true
 warn_unused_ignores = true
+
+# pika ships no type information, so its imports would otherwise fail the run.
+# Scoped to pika alone rather than relaxing the whole project.
+[[tool.mypy.overrides]]
+module = ["pika.*"]
+ignore_missing_imports = true

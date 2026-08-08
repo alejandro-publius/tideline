@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     noaa_backoff_base: float = 0.5
     noaa_cache_ttl_seconds: float = 60.0
     log_level: str = "INFO"
+    # Message broker for the telemetry event path (see ADR 0007). Empty disables
+    # publishing entirely, so the API and its tests run without a broker present.
+    broker_url: str = ""
+    broker_exchange: str = "tideline.readings"
+    # How long a publish may block before we give up and carry on serving reads.
+    broker_publish_timeout_seconds: float = 2.0
 
     model_config = {"env_prefix": "TIDELINE_"}
 

@@ -21,10 +21,11 @@ class Counter:
         self._values: dict[tuple[str, ...], int] = {}
         self._lock = threading.Lock()
 
-    def inc(self, **labels: str | int) -> None:
+    def inc(self, count: int = 1, **labels: str | int) -> None:
+        """Add to the counter. `count` lets a batch be recorded in one call."""
         key = tuple(str(labels[name]) for name in self.label_names)
         with self._lock:
-            self._values[key] = self._values.get(key, 0) + 1
+            self._values[key] = self._values.get(key, 0) + count
 
     def samples(self) -> dict[tuple[str, ...], int]:
         with self._lock:
@@ -66,6 +67,11 @@ CACHE_LOOKUPS = _counter(
 RATE_LIMITED = _counter(
     "tideline_rate_limited_total",
     "Requests rejected with 429 by the rate limiter.",
+)
+READINGS_PUBLISHED = _counter(
+    "tideline_readings_published_total",
+    "Readings announced on the event path, by publish outcome.",
+    ("result",),  # ok | failed (broker unreachable; reads are unaffected)
 )
 
 

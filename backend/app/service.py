@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from . import metrics
+from .broker import ReadingEvent, get_publisher
 from .config import get_settings
 from .models import FetchLog, Reading, Station
 from .noaa import NoaaClient, NoaaError
@@ -122,12 +123,32 @@ def _store(
             )
         )
     )
+    fresh = [(ts, value) for ts, value in series if ts not in existing]
     db.add_all(
         Reading(station_id=station_id, product=product, ts=ts, value=value)
-        for ts, value in series
-        if ts not in existing
+        for ts, value in fresh
     )
     db.commit()
+
+    # Announce only genuinely new rows, and only after the commit succeeds:
+    # publishing first would let a consumer react to a reading that the database
+    # then failed to keep.
+    _publish_readings(station_id, product, fresh)
+
+
+def _publish_readings(
+    station_id: str, product: str, fresh: list[tuple[datetime, float]]
+) -> None:
+    """Emit newly stored readings onto the event path (ADR 0007). Never raises."""
+    publisher = get_publisher()
+    if publisher is None or not fresh:
+        return
+    published = publisher.publish(
+        [ReadingEvent.build(station_id, product, ts, value) for ts, value in fresh]
+    )
+    metrics.READINGS_PUBLISHED.inc(
+        result="ok" if published else "failed", count=max(published, 1)
+    )
 
 
 OVERVIEW_PRODUCTS = ("water_level", "predictions")
