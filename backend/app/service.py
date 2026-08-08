@@ -125,8 +125,7 @@ def _store(
     )
     fresh = [(ts, value) for ts, value in series if ts not in existing]
     db.add_all(
-        Reading(station_id=station_id, product=product, ts=ts, value=value)
-        for ts, value in fresh
+        Reading(station_id=station_id, product=product, ts=ts, value=value) for ts, value in fresh
     )
     db.commit()
 
@@ -136,9 +135,7 @@ def _store(
     _publish_readings(station_id, product, fresh)
 
 
-def _publish_readings(
-    station_id: str, product: str, fresh: list[tuple[datetime, float]]
-) -> None:
+def _publish_readings(station_id: str, product: str, fresh: list[tuple[datetime, float]]) -> None:
     """Emit newly stored readings onto the event path (ADR 0007). Never raises."""
     publisher = get_publisher()
     if publisher is None or not fresh:
@@ -146,9 +143,7 @@ def _publish_readings(
     published = publisher.publish(
         [ReadingEvent.build(station_id, product, ts, value) for ts, value in fresh]
     )
-    metrics.READINGS_PUBLISHED.inc(
-        result="ok" if published else "failed", count=max(published, 1)
-    )
+    metrics.READINGS_PUBLISHED.inc(result="ok" if published else "failed", count=max(published, 1))
 
 
 OVERVIEW_PRODUCTS = ("water_level", "predictions")

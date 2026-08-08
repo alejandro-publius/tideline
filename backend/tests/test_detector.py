@@ -220,8 +220,10 @@ def test_record_reports_how_many_rows_it_wrote(db: Session) -> None:
         (b"{not json at all", "not JSON"),
         (b'{"station_id": "9414290"}', "missing fields"),
         (b'{"station_id":"x","product":"water_level","ts":"not-a-date","value":1.0}', "bad ts"),
-        (b'{"station_id":"x","product":"water_level","ts":"2026-08-08T12:00:00","value":"NaN?"}',
-         "non-numeric value"),
+        (
+            b'{"station_id":"x","product":"water_level","ts":"2026-08-08T12:00:00","value":"NaN?"}',
+            "non-numeric value",
+        ),
         (b"", "empty body"),
     ],
 )

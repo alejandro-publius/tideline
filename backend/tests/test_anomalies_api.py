@@ -14,12 +14,26 @@ def seeded(db: Session) -> Session:
     """Stations come from conftest's seed; this adds the anomalies to read back."""
     db.add_all(
         [
-            Anomaly(station_id="9414290", product="water_level", ts=datetime(2026, 8, 8, 10, 0),
-                    value=1.4, kind="flood", severity="moderate", residual=None,
-                    detected_at=datetime(2026, 8, 8, 10, 1)),
-            Anomaly(station_id="9414290", product="water_level", ts=datetime(2026, 8, 8, 12, 0),
-                    value=0.9, kind="surge", severity="above", residual=0.4,
-                    detected_at=datetime(2026, 8, 8, 12, 1)),
+            Anomaly(
+                station_id="9414290",
+                product="water_level",
+                ts=datetime(2026, 8, 8, 10, 0),
+                value=1.4,
+                kind="flood",
+                severity="moderate",
+                residual=None,
+                detected_at=datetime(2026, 8, 8, 10, 1),
+            ),
+            Anomaly(
+                station_id="9414290",
+                product="water_level",
+                ts=datetime(2026, 8, 8, 12, 0),
+                value=0.9,
+                kind="surge",
+                severity="above",
+                residual=0.4,
+                detected_at=datetime(2026, 8, 8, 12, 1),
+            ),
         ]
     )
     db.commit()
