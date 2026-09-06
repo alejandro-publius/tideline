@@ -14,8 +14,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { chromium } from 'playwright'
 
-// TODO (human): set the deployed URL (see DEPLOY.md), or pass TIDELINE_URL.
-const URL = process.env.TIDELINE_URL ?? 'TODO_HUMAN_DEPLOYED_URL'
+// Defaults to the local dev server; pass TIDELINE_URL to point at a deployment.
+const URL = process.env.TIDELINE_URL ?? 'http://localhost:5173'
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'screenshots')
 
@@ -29,11 +29,6 @@ const SHOTS = [
   // hero-only capture of the 3D surge globe (clipped, so no map below)
   { file: 'globe.png', width: 1440, height: 900, colorScheme: 'dark', clip: '.globe-hero' },
 ]
-
-if (URL.startsWith('TODO_HUMAN')) {
-  console.error('Set TIDELINE_URL to the deployed app URL first (see DEPLOY.md).')
-  process.exit(1)
-}
 
 const browser = await chromium.launch()
 try {

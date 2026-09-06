@@ -84,7 +84,7 @@ hidden, and degrades to the 2D map without WebGL. The scene itself is built
 imperatively outside React (built once, mutated on data changes) with the pure
 math — projection, color ramp, pillar sizing — split into a dependency-free
 module that unit-tests like the rest of the frontend logic. The decision
-record is [ADR 0007](docs/adr/0007-imperative-webgl-globe-outside-react.md).
+record is [ADR 0008](docs/adr/0008-imperative-webgl-globe-outside-react.md).
 
 ## Honest limits
 

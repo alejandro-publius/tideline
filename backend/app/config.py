@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     noaa_backoff_base: float = 0.5
     noaa_failure_cooldown_seconds: float = 60.0
     log_level: str = "INFO"
+    # Message broker for the telemetry event path (see ADR 0007). Empty disables
+    # publishing entirely, so the API and its tests run without a broker present.
+    broker_url: str = ""
+    broker_exchange: str = "tideline.readings"
+    # How long a publish may block before we give up and carry on serving reads.
+    broker_publish_timeout_seconds: float = 2.0
+    # How far an observation may sit from its astronomical prediction before the
+    # detector calls it surge, in metres. Mirrors SURGE_THRESHOLD in the frontend.
+    surge_threshold_m: float = 0.15
+    # Where messages go when the detector judges them permanently unprocessable,
+    # so one bad payload cannot block the readings behind it.
+    broker_dead_letter_exchange: str = "tideline.readings.dlx"
 
     model_config = {"env_prefix": "TIDELINE_"}
 

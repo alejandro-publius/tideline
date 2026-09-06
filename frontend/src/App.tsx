@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchOverview, fetchPredictions, fetchReadings, fetchStations } from './api'
+import { fetchAnomalies, fetchOverview, fetchPredictions, fetchReadings, fetchStations } from './api'
+import AnomalyFeed from './components/AnomalyFeed'
 import Controls from './components/Controls'
 import GlobeHero from './components/GlobeHero'
 import ReadingsChart from './components/ReadingsChart'
@@ -8,9 +9,10 @@ import StationMap from './components/StationMap'
 import StatTiles from './components/StatTiles'
 import { mergeSeries } from './lib/tides'
 import { DEFAULT_STATION, readUrlState, writeUrlState } from './lib/urlState'
-import type { Product, Series, Station, StationOverview } from './types'
+import type { Anomaly, Product, Series, Station, StationOverview } from './types'
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
+const ANOMALY_LIMIT = 12
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : 'Request failed')
 
@@ -52,6 +54,10 @@ export default function App() {
   const [predicted, setPredicted] = useState<Series | null>(null)
   const [loading, setLoading] = useState(true)
   const [seriesError, setSeriesError] = useState<string | null>(null)
+
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([])
+  const [anomaliesLoading, setAnomaliesLoading] = useState(true)
+  const [anomaliesError, setAnomaliesError] = useState<string | null>(null)
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -104,6 +110,22 @@ export default function App() {
       .then((data) => setOverview(data.stations))
       .catch(() => {
         // map falls back to uncolored markers; not worth an error state
+      })
+    return () => ctrl.abort()
+  }, [refreshTick])
+
+  // the detector records these off the request path, so they load independently
+  // of the selected station and cover every station at once
+  useEffect(() => {
+    const ctrl = new AbortController()
+    setAnomaliesError(null)
+    fetchAnomalies(ANOMALY_LIMIT, ctrl.signal)
+      .then((data) => setAnomalies(data.anomalies))
+      .catch((err) => {
+        if (!ctrl.signal.aborted) setAnomaliesError(errorMessage(err))
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setAnomaliesLoading(false)
       })
     return () => ctrl.abort()
   }, [refreshTick])
@@ -248,6 +270,15 @@ export default function App() {
             </>
           )}
         </section>
+
+        <AnomalyFeed
+          anomalies={anomalies}
+          loading={anomaliesLoading}
+          error={anomaliesError}
+          onRetry={() => setRefreshTick((t) => t + 1)}
+          nowMs={nowMs}
+          units={units}
+        />
       </main>
 
       <footer className="app-footer">

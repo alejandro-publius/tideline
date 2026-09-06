@@ -96,6 +96,16 @@ export function fmtDuration(ms: number): string {
   return h > 0 ? `in ${h}h ${mins % 60}m` : `in ${mins} min`
 }
 
+/** "12m ago" / "3h 5m ago" / "2d 4h ago" — past-tense sibling of fmtDuration. */
+export function fmtAgo(ms: number): string {
+  const mins = Math.max(0, Math.round(ms / 60_000))
+  if (mins < 1) return 'just now'
+  const hours = Math.floor(mins / 60)
+  if (hours < 1) return `${mins}m ago`
+  if (hours < 24) return `${hours}h ${mins % 60}m ago`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h ago`
+}
+
 export const fmtTime = (ms: number) => timeFmt.format(new Date(ms))
 export const fmtDayTime = (ms: number) => dayTimeFmt.format(new Date(ms))
 

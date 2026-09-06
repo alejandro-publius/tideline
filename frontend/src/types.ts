@@ -37,3 +37,19 @@ export interface StationOverview {
   surge: number | null
   flood_stage: FloodStage | null
 }
+
+export type AnomalyKind = 'flood' | 'surge'
+
+/** An anomaly the detector recorded off the event path (see ADR 0007). */
+export interface Anomaly {
+  station_id: string
+  station_name: string
+  ts: string // ISO 8601, UTC
+  value: number
+  kind: AnomalyKind
+  /** flood: minor | moderate | major. surge: above | below. */
+  severity: string
+  /** observed - predicted, meters. Null for flood anomalies. */
+  residual: number | null
+  detected_at: string
+}

@@ -11,7 +11,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import func, select
@@ -19,8 +19,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from . import metrics
+from .broker import ReadingEvent, get_publisher
 from .config import get_settings
-from .models import FetchLog, Reading, Station
+from .models import Anomaly, FetchLog, Reading, Station
 from .noaa import NoaaClient, NoaaError
 
 logger = logging.getLogger("tideline.service")
@@ -51,7 +52,7 @@ class SeriesResult:
 
 def utcnow() -> datetime:
     """Naive UTC now; all timestamps in the system are naive UTC."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _ttl_for(product: str) -> timedelta:
@@ -150,7 +151,7 @@ def _store(
     if not series:
         return
 
-    def insert_missing() -> None:
+    def insert_missing() -> list[tuple[datetime, float]]:
         existing = set(
             db.scalars(
                 select(Reading.ts).where(
@@ -160,27 +161,45 @@ def _store(
                 )
             )
         )
+        fresh = [(ts, value) for ts, value in series if ts not in existing]
         db.add_all(
             Reading(station_id=station_id, product=product, ts=ts, value=value)
-            for ts, value in series
-            if ts not in existing
+            for ts, value in fresh
         )
         db.commit()
+        return fresh
 
     # Concurrent sessions (requests and the background sweep) can all find the
     # same pair stale and race this upsert; a loser trips the unique constraint.
     # Each writer fetched at its own `utcnow()`, so the series are *nearly* but
     # not exactly identical — a re-read converges almost always, yet a third
     # writer can conflict again, so retry bounded and re-raise loudly after.
+    fresh: list[tuple[datetime, float]] = []
     attempts = 3
     for attempt in range(1, attempts + 1):
         try:
-            insert_missing()
-            return
+            fresh = insert_missing()
+            break
         except IntegrityError:
             db.rollback()
             if attempt == attempts:
                 raise
+
+    # Announce only genuinely new rows, and only after the commit succeeds:
+    # publishing first would let a consumer react to a reading that the database
+    # then failed to keep.
+    _publish_readings(station_id, product, fresh)
+
+
+def _publish_readings(station_id: str, product: str, fresh: list[tuple[datetime, float]]) -> None:
+    """Emit newly stored readings onto the event path (ADR 0007). Never raises."""
+    publisher = get_publisher()
+    if publisher is None or not fresh:
+        return
+    published = publisher.publish(
+        [ReadingEvent.build(station_id, product, ts, value) for ts, value in fresh]
+    )
+    metrics.READINGS_PUBLISHED.inc(result="ok" if published else "failed", count=max(published, 1))
 
 
 OVERVIEW_PRODUCTS = ("water_level", "predictions")
@@ -393,3 +412,52 @@ def _touch_log(
         log.fetched_at = now
         db.commit()
     return log
+
+
+@dataclass
+class AnomalyRow:
+    """An anomaly joined to its station's display name."""
+
+    station_id: str
+    station_name: str
+    ts: datetime
+    value: float
+    kind: str
+    severity: str
+    residual: float | None
+    detected_at: datetime
+
+
+def recent_anomalies(
+    db: Session, limit: int = 50, station_id: str | None = None, kind: str | None = None
+) -> list[AnomalyRow]:
+    """Most recent anomalies the detector recorded, newest first.
+
+    Reads only what the detector already persisted — no NOAA calls, no
+    recomputation. If the detector is down this returns the last thing it knew,
+    which is the honest answer rather than a silently recomputed one.
+    """
+    query = (
+        select(Anomaly, Station.name)
+        .join(Station, Station.id == Anomaly.station_id)
+        .order_by(Anomaly.ts.desc())
+        .limit(limit)
+    )
+    if station_id is not None:
+        query = query.where(Anomaly.station_id == station_id)
+    if kind is not None:
+        query = query.where(Anomaly.kind == kind)
+
+    return [
+        AnomalyRow(
+            station_id=anomaly.station_id,
+            station_name=station_name,
+            ts=anomaly.ts,
+            value=anomaly.value,
+            kind=anomaly.kind,
+            severity=anomaly.severity,
+            residual=anomaly.residual,
+            detected_at=anomaly.detected_at,
+        )
+        for anomaly, station_name in db.execute(query).all()
+    ]

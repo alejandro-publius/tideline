@@ -1,4 +1,4 @@
-# ADR 0007: Render the surge globe imperatively, outside React, in a lazy chunk
+# ADR 0008: Render the surge globe imperatively, outside React, in a lazy chunk
 
 **Status:** accepted (July 2026)
 

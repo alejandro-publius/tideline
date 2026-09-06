@@ -13,4 +13,5 @@ gets superseded rather than rewritten.
 | [0004](0004-in-process-rate-limiting-and-metrics.md) | Rate limiting and metrics in-process, no Redis / no client library |
 | [0005](0005-retry-only-transient-noaa-failures.md) | Retry only transient NOAA failures, with exponential backoff |
 | [0006](0006-mcp-server-shares-read-path.md) | Expose the data over MCP, reusing the HTTP read path |
-| [0007](0007-imperative-webgl-globe-outside-react.md) | Render the surge globe imperatively, outside React, in a lazy chunk |
+| [0007](0007-event-driven-anomaly-detection.md) | Publish readings to a broker so anomaly detection runs independently of reads |
+| [0008](0008-imperative-webgl-globe-outside-react.md) | Render the surge globe imperatively, outside React, in a lazy chunk |
