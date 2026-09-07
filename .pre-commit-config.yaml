@@ -1,0 +1,14 @@
+# Mirrors the backend "Lint" step in CI (.github/workflows/ci.yml): ruff
+# check plus format, scoped to backend/ since that's the only Python in the
+# repo. Install with `pre-commit install` after `pip install pre-commit`.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff
+        name: ruff check (backend)
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        name: ruff format (backend)
+        files: ^backend/
