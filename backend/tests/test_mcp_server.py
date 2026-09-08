@@ -110,10 +110,12 @@ def _list_tools_over_stdio():
             # touching a real tideline.db just in case.
             env={**os.environ, "TIDELINE_DATABASE_URL": "sqlite://"},
         )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                return await session.list_tools()
+        async with (
+            stdio_client(params) as (read, write),
+            ClientSession(read, write) as session,
+        ):
+            await session.initialize()
+            return await session.list_tools()
 
     return asyncio.run(asyncio.wait_for(run(), timeout=20))
 
