@@ -75,6 +75,31 @@ def test_overview_reports_nws_flood_stages(client):
 
 
 @respx.mock
+def test_overview_reports_null_surge_when_predictions_are_missing(client):
+    """A station with an observed reading but no tide prediction (NOAA's own
+    "No data was found" answer, not a failure) must report observed with a
+    null predicted/surge -- not crash, and not silently pretend surge is 0."""
+    no_predictions = {"error": {"message": "No data was found for this station"}}
+
+    def respond(request):
+        if request.url.params["product"] == "predictions":
+            return Response(200, json=no_predictions)
+        return Response(200, json=water_level_payload())
+
+    route = respx.get(NOAA_URL).mock(side_effect=respond)
+
+    resp = client.get("/api/overview")
+
+    assert resp.status_code == 200
+    rows = {row["station"]["id"]: row for row in resp.json()["stations"]}
+    for row in rows.values():
+        assert row["observed"] == pytest.approx(1.09)
+        assert row["predicted"] is None
+        assert row["surge"] is None
+    assert route.call_count == EXPECTED_CALLS
+
+
+@respx.mock
 def test_overview_survives_a_failing_station(client):
     route = respx.get(NOAA_URL).mock(
         side_effect=_responder(
