@@ -126,6 +126,33 @@ def test_backoff_grows_exponentially():
 
 
 @respx.mock
+def test_429_rate_limit_is_retried_then_succeeds():
+    """A 429 is NOAA saying "slow down", not "this request is wrong" -- unlike a
+    real 4xx it resolves on its own, so it must be retried like a 5xx rather than
+    surfaced as an immediate, permanent failure."""
+    route = respx.get(NOAA_URL)
+    route.side_effect = [
+        Response(429, text="Too Many Requests"),
+        Response(200, json={"data": [{"t": "2026-07-09 10:00", "v": "1.5"}]}),
+    ]
+
+    series = _client(max_retries=3).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert series == [(datetime(2026, 7, 9, 10, 0), 1.5)]
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_429_exhausts_retries_and_raises_noaa_error():
+    route = respx.get(NOAA_URL).mock(return_value=Response(429))
+
+    with pytest.raises(NoaaError, match="HTTP 429"):
+        _client(max_retries=2).fetch_series("9414290", "water_level", BEGIN, END)
+
+    assert route.call_count == 3  # 1 initial + 2 retries
+
+
+@respx.mock
 def test_4xx_is_not_retried():
     """A client error is deterministic — surface it on the first response."""
     route = respx.get(NOAA_URL).mock(return_value=Response(404))
