@@ -115,3 +115,37 @@ def test_overview_survives_a_failing_station(client):
     healthy = [r for sid, r in rows.items() if sid != "9414290"]
     assert all(r["surge"] is not None for r in healthy)
     assert route.call_count == EXPECTED_CALLS
+
+
+@respx.mock
+def test_overview_survives_a_duplicate_timestamp_in_one_payload(client):
+    """NOAA has, on occasion, repeated a timestamp within a single response
+    (e.g. a preliminary reading followed by its verified replacement, both
+    still in the same window). One station's payload carrying a duplicate
+    timestamp must not corrupt the whole sweep -- every other station's
+    surge must still come back, not just the offending one's."""
+    dup_payload = water_level_payload()
+    dup_row = dict(dup_payload["data"][-1])
+    dup_row["v"] = f"{float(dup_row['v']) + 0.01:.3f}"  # revised value, same "t"
+    dup_payload["data"].append(dup_row)
+
+    def respond(request):
+        if request.url.params["product"] == "predictions":
+            return Response(200, json=predictions_payload())
+        if request.url.params["station"] == "9414290":
+            return Response(200, json=dup_payload)
+        return Response(200, json=water_level_payload())
+
+    route = respx.get(NOAA_URL).mock(side_effect=respond)
+
+    resp = client.get("/api/overview")
+
+    assert resp.status_code == 200
+    rows = {row["station"]["id"]: row for row in resp.json()["stations"]}
+    assert len(rows) == len(SEED_STATIONS)
+    # the one station with the duplicated timestamp still resolves to a value
+    assert rows["9414290"]["surge"] is not None
+    # crucially, every OTHER station must not be dragged down by that one bad payload
+    healthy = [r for sid, r in rows.items() if sid != "9414290"]
+    assert all(r["surge"] is not None for r in healthy)
+    assert route.call_count == EXPECTED_CALLS
