@@ -11,6 +11,8 @@ There is no public instance to link to. Tideline runs locally in two commands (s
 
 Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tidesandcurrents.noaa.gov/api/prod/), caches it in SQLite, and shows each station's **observed water level** against the **astronomical prediction** (the tide as pure celestial mechanics would have it). The difference between the two — the **surge residual** — is the interesting part: it's the signature of storm surge, wind setup, and pressure anomalies that the tide tables can't see.
 
+![3D surge globe](docs/screenshots/globe.png)
+
 ![Tideline dashboard](docs/screenshots/dashboard.png)
 
 <p align="center">
@@ -20,6 +22,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 
 ## Features
 
+- **3D surge globe** — the whole coastline as a slowly-turning planet in space: every station is a luminous pillar whose **height and color are its live storm-surge residual**, keyed on an [AlphaFold](https://alphafold.ebi.ac.uk/)-style confidence ramp (calm blue → storm orange). Drag to orbit, ctrl + scroll to zoom (a hero must never hijack page scrolling), click a pillar to dive into that station; stations at flood stage pulse a radar ping. It's lazy-loaded so three.js never touches first paint, pauses itself when scrolled off-screen, honors `prefers-reduced-motion`, and falls back to the 2D map where WebGL is unavailable.
 - **National surge overview** — map markers turn red/blue when a station runs beyond ±0.15 m of its predicted tide, so one glance shows which coast is anomalous right now
 - **Interactive station map** — 13 NOAA stations across both coasts, Gulf, and Hawaii; click a marker or use the dropdown (the map pans to off-screen picks)
 - **Observed vs. predicted overlay chart** with a "now" marker, so you can see the upcoming tide as well as the last few days
@@ -27,7 +30,7 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 - **Next high/low tide** with a live countdown, derived from the prediction series
 - **Shareable URLs** — station, product, and time range round-trip through the query string
 - **Read-through cache with graceful degradation** — repeated requests serve from SQLite; if NOAA is unreachable the API returns the last known data flagged `stale`, and the UI offers a retry
-- **Resilient NOAA pipeline** — transient upstream failures (network errors, 5xx) retry with exponential backoff; deterministic ones fail fast and degrade to the stale cache instead of hammering a struggling API
+- **Resilient NOAA pipeline** — transient upstream failures (network errors, 5xx) retry with exponential backoff; deterministic ones fail fast and degrade to the stale cache instead of hammering a struggling API; after a failure, a short per-series cooldown serves stale data immediately instead of re-paying the retry cost on every request
 - **Event-driven anomaly detection** — newly stored readings are published to a RabbitMQ exchange and judged by a separate consumer process, against both the station's NWS flood thresholds and its astronomical tide prediction, so a crossing is recorded when it happens rather than when someone opens the dashboard; the findings are served at `GET /api/anomalies`
 - **Rate-limited, observable API** — per-client token bucket (`429` + `Retry-After`, health checks exempt) and Prometheus-format counters at `/api/metrics`: requests by route, cache hit/miss/stale, NOAA outcomes and retries, throttles
 - **CSV dataset export** — each station's accumulated observed/predicted/surge history as an analysis-ready download, one click from the dashboard
@@ -40,11 +43,15 @@ Tideline pulls real-time coastal data from the [NOAA CO-OPS API](https://api.tid
 ```mermaid
 flowchart LR
     subgraph Browser
-        UI[React + TypeScript<br/>Leaflet map · Recharts chart]
+        UI[React + TypeScript<br/>three.js surge globe · Leaflet map · Recharts charts]
+    end
+    subgraph Agents[AI agents]
+        CLIENT[MCP client<br/>Claude Desktop · agent platforms]
     end
     subgraph Backend[FastAPI]
         API[REST API]
-        SVC[Cache service<br/>TTL + stale fallback]
+        MCPS[MCP server<br/>stdio · read-only tools]
+        SVC[Cache service<br/>TTL + stale fallback + failure cooldown]
         SCHED[Scheduler<br/>periodic surge-history sweep]
     end
     MQ{{RabbitMQ topic exchange<br/>tideline.readings}}
@@ -53,7 +60,9 @@ flowchart LR
     NOAA[NOAA CO-OPS API]
 
     UI -- "/api/*" --> API
+    CLIENT -- "tool calls" --> MCPS
     API --> SVC
+    MCPS -- "shared read path" --> SVC
     SCHED -- "background ingest" --> SVC
     SVC <--> DB
     SVC -- "on cache miss / refresh" --> NOAA
@@ -98,7 +107,7 @@ The interesting problems, in brief; the full narrative is in [WRITEUP.md](WRITEU
 - **Time-series storage and accumulation.** Refreshes upsert over the full 72-hour window, so history accumulates without duplicate rows; a background sweep keeps it growing with no visitors, which is what makes daily-surge history and export possible without a separate ingestion pipeline.
 - **NWS flood-stage mapping.** Observed levels are classified against each station's official minor/moderate/major thresholds (meters above MLLW), so the map shows not just "anomalous" but "anomalous relative to what floods *here*."
 - **Detecting anomalies without putting detection on the ingest path.** Evaluating readings inline would mean a slow or crashing detector takes data collection down with it, which is backwards for a monitoring system: the moment detection breaks is the moment you most want the raw data still landing. Readings are handed to a broker instead and judged in a separate process, which makes at-least-once redelivery — and therefore idempotent writes — a design constraint rather than an afterthought.
-- **NOAA rate limiting and flakiness.** The read-through cache collapses repeated requests; transient failures retry with exponential backoff while deterministic ones fail fast; an in-process memo de-duplicates identical calls — together keeping load on NOAA low and the app responsive when NOAA isn't.
+- **NOAA rate limiting and flakiness.** The read-through cache collapses repeated requests; transient failures retry with exponential backoff while deterministic ones fail fast; an in-process memo de-duplicates identical calls, and a per-series failure cooldown serves stale data during an outage instead of re-paying the retry cost per request — together keeping load on NOAA low and the app responsive when NOAA isn't.
 
 ## Security & operations
 
@@ -135,7 +144,7 @@ cd backend && python -m app.mcp_server      # serves over stdio (or: make mcp)
 
 | Tool | Returns |
 |---|---|
-| `list_stations()` | Every station with location and flood threshold |
+| `list_stations()` | Every station with location and NWS flood thresholds (minor/moderate/major) |
 | `surge_overview()` | Latest surge for all stations, **most anomalous first** |
 | `station_surge(station_id)` | Latest observed / predicted / surge / flood stage for one station |
 | `surge_history(station_id, days=30)` | Daily surge statistics over the trailing window |
@@ -149,7 +158,7 @@ The tools reuse the exact same read-only query functions as the REST API (`servi
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, httpx, pydantic-settings |
 | Database | SQLite (swap to Postgres by changing `TIDELINE_DATABASE_URL` — no dialect-specific SQL) |
 | Event path | RabbitMQ (durable topic exchange, dead-letter queue) via `pika`; the detector is a standalone process |
-| Frontend | React 19, TypeScript, Vite, react-leaflet, Recharts |
+| Frontend | React 19, TypeScript, Vite, react-leaflet, Recharts, three.js (WebGL surge globe) |
 | Agent interface | Model Context Protocol server (`mcp`), stdio transport |
 | Tests | pytest + respx (NOAA mocked at the HTTP transport layer); Vitest for frontend logic |
 | CI/CD | GitHub Actions → Docker → Render; Dependabot for dependency updates |
@@ -203,16 +212,16 @@ To explore the full app offline — map colors, surge history, CSV export — se
 cd backend && python -m app.seed_demo --days 14
 ```
 
-This populates the database and marks the cache fresh, so every endpoint serves without a live NOAA connection — handy for a reviewer or a screenshot.
+This populates the database and marks the cache fresh, so every endpoint serves without a live NOAA connection — handy for a reviewer or a screenshot. The seeded freshness lasts one cache TTL (10 minutes for observations by default); to stay offline longer, start the server with the TTLs raised, e.g. `TIDELINE_CACHE_TTL_MINUTES=1440 TIDELINE_PREDICTIONS_TTL_MINUTES=1440 TIDELINE_HISTORY_REFRESH_MINUTES=0`.
 
 ### Tests
 
 ```bash
-cd backend && pytest -v      # 98 tests (or: make test-backend)
-cd frontend && npm test      # 36 tests (or: make test-frontend)
+cd backend && pytest -v      # 103 tests (or: make test-backend)
+cd frontend && npm test      # 54 tests (or: make test-frontend)
 ```
 
-The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience and a station with no tide prediction at all), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. The MCP server's tool schema (names, argument names) is pinned by a real stdio round-trip against the running server, not just its internal helpers. The event path is covered without a broker: routing-key construction and the fail-soft publish are tested against a stubbed connection, and the detector's verdicts, redelivery idempotence (including a reading that raises both a flood and a surge verdict, and one that has already recorded half of them), and dead-lettering decisions are tested by calling the message handler directly. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion) and URL state round-tripping.
+The backend suite covers the full cache lifecycle (cold → warm → expired → stale fallback), the full-window refresh invariant, upsert de-duplication, NOAA response parsing (sensor gaps, no-sensor stations, non-JSON maintenance pages), the retry policy (transient vs. deterministic failures, backoff timing with an injected sleeper), rate limiting (bucket math against a fake clock, `429`/`Retry-After` behavior, health-check exemption, bucket pruning), metrics (route-template labels, cardinality bounds), CSV export, flood-stage classification, the overview sweep (including one-station-failure resilience and a station with no tide prediction at all), history aggregation, gzip, and request validation — NOAA is mocked with `respx`, so everything runs offline in a few seconds. The MCP server's tool schema (names, argument names) is pinned by a real stdio round-trip against the running server, not just its internal helpers. The event path is covered without a broker: routing-key construction and the fail-soft publish are tested against a stubbed connection, and the detector's verdicts, redelivery idempotence (including a reading that raises both a flood and a surge verdict, and one that has already recorded half of them), and dead-lettering decisions are tested by calling the message handler directly. In CI the same suite also runs against a real `postgres:16`. The frontend suite covers the tide math (series merging, surge residual, next-extreme detection, axis ticks, unit conversion), URL state round-tripping, and the globe helpers (lat/lng→sphere projection, the AlphaFold confidence color ramp, and surge→pillar-height mapping).
 
 ## Docker
 
@@ -245,6 +254,7 @@ All settings are environment variables with sensible defaults (`backend/app/conf
 | `TIDELINE_NOAA_MAX_RETRIES` | `3` | Retry budget for transient NOAA failures (network errors, 5xx) |
 | `TIDELINE_NOAA_BACKOFF_BASE` | `0.5` | Exponential backoff base between retries, in seconds |
 | `TIDELINE_NOAA_CACHE_TTL_SECONDS` | `60` | In-process memo TTL for identical NOAA requests |
+| `TIDELINE_NOAA_FAILURE_COOLDOWN_SECONDS` | `60` | After a NOAA failure, serve stale for this long instead of retrying per request (`0` disables) |
 | `TIDELINE_BROKER_URL` | *(empty)* | AMQP URL for the event path, e.g. `amqp://guest:guest@localhost:5672/`. Empty disables publishing entirely and the detector refuses to start |
 | `TIDELINE_BROKER_EXCHANGE` | `tideline.readings` | Durable topic exchange readings are published to |
 | `TIDELINE_BROKER_DEAD_LETTER_EXCHANGE` | `tideline.readings.dlx` | Where the detector sends messages it can never process |

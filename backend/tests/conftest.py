@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import metrics
+from app import metrics, service
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app, limiter
@@ -21,10 +21,13 @@ NOAA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 
 @pytest.fixture(autouse=True)
 def _fresh_counters_and_buckets():
-    """Metrics and rate-limit buckets are process-global; zero them per test so
-    no test observes another's counts or inherits a drained token bucket."""
+    """Metrics, rate-limit buckets, and the NOAA failure cooldown are
+    process-global; zero them per test so no test observes another's counts,
+    inherits a drained token bucket, or gets stale-served by a cooldown some
+    earlier test's simulated outage left behind."""
     metrics.reset()
     limiter.reset()
+    service._last_failure.clear()
     yield
 
 
@@ -88,10 +91,10 @@ def db(session_factory):
 
 
 def _no_retry_client() -> NoaaClient:
-    """App NOAA client with retries and memoization disabled, so endpoint tests
-    stay deterministic and never sleep on backoff. Retry/backoff/caching are
+    """App NOAA client with retries disabled, so endpoint tests stay
+    deterministic and never sleep on backoff. Retry/backoff behavior is
     covered directly in test_noaa_client."""
-    return NoaaClient(get_settings().noaa_base_url, max_retries=0, backoff_base=0, cache_ttl=0)
+    return NoaaClient(get_settings().noaa_base_url, max_retries=0, backoff_base=0)
 
 
 @pytest.fixture()

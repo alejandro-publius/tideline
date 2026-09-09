@@ -23,8 +23,12 @@ Classify failures before retrying (`noaa.py`):
 - "No data was found" is not a failure at all — it's a valid empty answer
   (some stations simply lack a sensor for a product).
 
-Identical requests are also memoized per client instance for a short TTL, so
-one overview sweep never fetches the same series twice.
+A failure also starts a short per-(station, product) cooldown in the cache
+layer: requests inside it serve stale immediately (or fail fast with 502 when
+nothing is cached yet) instead of each re-paying the full retry/timeout cost,
+so an outage is absorbed rather than amplified.
+(An earlier per-client response memo was removed once it proved inert —
+clients are per-request, so identical fetches never recurred within one.)
 
 ## Consequences
 

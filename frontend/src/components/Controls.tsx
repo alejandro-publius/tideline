@@ -1,12 +1,11 @@
 import type { Units } from '../lib/tides'
+import { VALID_HOURS } from '../lib/urlState'
 import type { Product } from '../types'
 
 const PRODUCTS: { value: Product; label: string }[] = [
   { value: 'water_level', label: 'Water level' },
   { value: 'water_temperature', label: 'Water temp' },
 ]
-
-const RANGES = [12, 24, 48, 72]
 
 const UNITS: { value: Units; label: string }[] = [
   { value: 'metric', label: 'm · °C' },
@@ -47,7 +46,7 @@ export default function Controls({
         ))}
       </div>
       <div className="seg" role="group" aria-label="Time range">
-        {RANGES.map((h) => (
+        {VALID_HOURS.map((h) => (
           <button key={h} type="button" aria-pressed={hours === h} onClick={() => onHours(h)}>
             {h}h
           </button>

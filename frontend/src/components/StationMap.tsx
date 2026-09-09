@@ -1,7 +1,7 @@
 import { latLng, latLngBounds } from 'leaflet'
 import { useEffect } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
-import { fmtLevel, SURGE_THRESHOLD, type Units } from '../lib/tides'
+import { fmtLevel, fmtSignedLevel, SURGE_THRESHOLD, type Units } from '../lib/tides'
 import { useChartTheme, type ChartTheme } from '../theme'
 import type { Station, StationOverview } from '../types'
 
@@ -35,7 +35,13 @@ function PanToSelection({ station }: { station: Station | undefined }) {
     if (!station) return
     const target = latLng(station.lat, station.lon)
     if (!map.getBounds().pad(-0.15).contains(target)) {
-      map.flyTo(target, Math.max(map.getZoom(), 6), { duration: 0.8 })
+      const zoom = Math.max(map.getZoom(), 6)
+      // honor the OS "reduce motion" setting: jump instead of animating
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        map.setView(target, zoom, { animate: false })
+      } else {
+        map.flyTo(target, zoom, { duration: 0.8 })
+      }
     }
   }, [map, station])
   return null
@@ -50,7 +56,6 @@ function markerColor(surge: number | null | undefined, theme: ChartTheme): strin
 }
 
 export default function StationMap({ stations, selectedId, onSelect, overviewById, units }: Props) {
-  const fmtSurge = (surge: number) => `${surge >= 0 ? '+' : '−'}${fmtLevel(Math.abs(surge), units)}`
   const threshold = fmtLevel(SURGE_THRESHOLD, units)
   const theme = useChartTheme()
   const bounds = latLngBounds(stations.map((s) => [s.lat, s.lon] as [number, number])).pad(0.12)
@@ -87,14 +92,19 @@ export default function StationMap({ stations, selectedId, onSelect, overviewByI
             >
               <Tooltip direction="top" offset={[0, -6]}>
                 {station.name}, {station.state}
-                {known && ` · surge ${fmtSurge(surge)}`}
+                {known && ` · surge ${fmtSignedLevel(surge, units)}`}
                 {flooding && ` · ${flooding.toUpperCase()} FLOODING`}
               </Tooltip>
             </CircleMarker>
           )
         })}
       </MapContainer>
-      <div className="map-legend" aria-label="Surge legend">
+      {/* role="img" so the aria-label is actually exposed (labels on generic divs are ignored) */}
+      <div
+        className="map-legend"
+        role="img"
+        aria-label="Surge legend: red is above prediction, blue below, gray near zero, hollow no data"
+      >
         <span className="legend-item">
           <span className="legend-dot" style={{ background: theme.surgeAbove }} /> ≥ +{threshold}
         </span>

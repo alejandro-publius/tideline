@@ -8,12 +8,14 @@ unreachable, previously cached data is served with source="stale".
 """
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from . import metrics
@@ -29,6 +31,12 @@ Source = Literal["noaa", "cache", "stale"]
 # Widest range the API serves; refreshes always cover it in full.
 MAX_LOOKBACK_HOURS = 72
 PREDICTIONS_LOOKAHEAD_HOURS = 48
+
+# Failure cooldown: when NOAA fails for a (station, product) pair, remember it
+# so the next requests within the window serve stale immediately instead of
+# each re-paying the full retry/timeout cost — an outage must be absorbed, not
+# amplified. Keyed on monotonic time; bounded at stations x products entries.
+_last_failure: dict[tuple[str, str], float] = {}
 
 
 class UpstreamUnavailable(Exception):
@@ -57,8 +65,28 @@ def _ttl_for(product: str) -> timedelta:
 def _fetch_window(product: str, now: datetime) -> tuple[datetime, datetime]:
     begin = now - timedelta(hours=MAX_LOOKBACK_HOURS)
     if product == "predictions":
-        return begin, now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS)
+        # Over-fetch by the TTL: a fetch is considered fresh for the whole TTL
+        # window, so it must cover the full look-ahead as seen from the *end*
+        # of that window — otherwise a request near the TTL's edge would get a
+        # "fresh" response whose future coverage has silently eroded.
+        return begin, now + timedelta(hours=PREDICTIONS_LOOKAHEAD_HOURS) + _ttl_for(product)
     return begin, now
+
+
+def _needs_refresh(log: FetchLog | None, product: str, now: datetime) -> bool:
+    return log is None or now - log.fetched_at >= _ttl_for(product)
+
+
+def _in_failure_cooldown(station_id: str, product: str) -> bool:
+    cooldown = get_settings().noaa_failure_cooldown_seconds
+    if cooldown <= 0:
+        return False
+    last = _last_failure.get((station_id, product))
+    return last is not None and time.monotonic() - last < cooldown
+
+
+def _record_failure(station_id: str, product: str) -> None:
+    _last_failure[(station_id, product)] = time.monotonic()
 
 
 def get_series(
@@ -73,22 +101,30 @@ def get_series(
     now = utcnow()
     source: Source = "cache"
 
-    if log is None or now - log.fetched_at >= _ttl_for(product):
-        try:
-            fetch_begin, fetch_end = _fetch_window(product, now)
-            series = client.fetch_series(station.id, product, fetch_begin, fetch_end)
-        except NoaaError as exc:
+    if _needs_refresh(log, product, now):
+        if _in_failure_cooldown(station.id, product):
+            # NOAA just failed for this pair; don't re-pay the retry cost on
+            # every request — serve stale until the cooldown expires.
             if log is None:
-                raise UpstreamUnavailable(str(exc)) from exc
-            logger.warning(
-                "serving stale data after NOAA failure",
-                extra={"station": station.id, "product": product},
-            )
+                raise UpstreamUnavailable("NOAA unavailable (failure cooldown)")
             source = "stale"
         else:
-            _store(db, station.id, product, series)
-            log = _touch_log(db, log, station.id, product, now)
-            source = "noaa"
+            try:
+                fetch_begin, fetch_end = _fetch_window(product, now)
+                series = client.fetch_series(station.id, product, fetch_begin, fetch_end)
+            except NoaaError as exc:
+                _record_failure(station.id, product)
+                if log is None:
+                    raise UpstreamUnavailable(str(exc)) from exc
+                logger.warning(
+                    "serving stale data after NOAA failure",
+                    extra={"station": station.id, "product": product},
+                )
+                source = "stale"
+            else:
+                _store(db, station.id, product, series)
+                log = _touch_log(db, log, station.id, product, now)
+                source = "noaa"
 
     metrics.CACHE_LOOKUPS.inc(result=source)
     readings = db.scalars(
@@ -124,21 +160,46 @@ def _store(
     """
     if not series:
         return
+
+    # Collapse duplicates from the payload itself before touching the database
+    # (see the docstring). Doing it here means the retry below only ever has to
+    # deal with a genuine race between writers, not with a series that could
+    # never have been inserted in the first place.
     deduped: dict[datetime, float] = dict(series)
-    existing = set(
-        db.scalars(
-            select(Reading.ts).where(
-                Reading.station_id == station_id,
-                Reading.product == product,
-                Reading.ts.in_(deduped.keys()),
+
+    def insert_missing() -> list[tuple[datetime, float]]:
+        existing = set(
+            db.scalars(
+                select(Reading.ts).where(
+                    Reading.station_id == station_id,
+                    Reading.product == product,
+                    Reading.ts.in_(deduped.keys()),
+                )
             )
         )
-    )
-    fresh = [(ts, value) for ts, value in deduped.items() if ts not in existing]
-    db.add_all(
-        Reading(station_id=station_id, product=product, ts=ts, value=value) for ts, value in fresh
-    )
-    db.commit()
+        fresh = [(ts, value) for ts, value in deduped.items() if ts not in existing]
+        db.add_all(
+            Reading(station_id=station_id, product=product, ts=ts, value=value)
+            for ts, value in fresh
+        )
+        db.commit()
+        return fresh
+
+    # Concurrent sessions (requests and the background sweep) can all find the
+    # same pair stale and race this upsert; a loser trips the unique constraint.
+    # Each writer fetched at its own `utcnow()`, so the series are *nearly* but
+    # not exactly identical -- a re-read converges almost always, yet a third
+    # writer can conflict again, so retry bounded and re-raise loudly after.
+    fresh: list[tuple[datetime, float]] = []
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            fresh = insert_missing()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == attempts:
+                raise
 
     # Announce only genuinely new rows, and only after the commit succeeds:
     # publishing first would let a consumer react to a reading that the database
@@ -202,8 +263,8 @@ def _refresh_stale_series(
         (station, product)
         for station in stations
         for product in products
-        if (log := db.get(FetchLog, (station.id, product))) is None
-        or now - log.fetched_at >= _ttl_for(product)
+        if _needs_refresh(db.get(FetchLog, (station.id, product)), product, now)
+        and not _in_failure_cooldown(station.id, product)
     ]
     if not stale:
         return
@@ -214,6 +275,7 @@ def _refresh_stale_series(
         try:
             return station, product, client.fetch_series(station.id, product, begin, end)
         except NoaaError:
+            _record_failure(station.id, product)
             return station, product, None
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -222,8 +284,18 @@ def _refresh_stale_series(
     for station, product, series in results:
         if series is None:
             continue
-        _store(db, station.id, product, series)
-        _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
+        try:
+            _store(db, station.id, product, series)
+            _touch_log(db, db.get(FetchLog, (station.id, product)), station.id, product, now)
+        except IntegrityError:
+            # A pathologically racy pair (writers conflicting past the bounded
+            # retries) must not kill the sweep — the station just stays stale
+            # this round, honoring "an overview must not die on one bad station".
+            db.rollback()
+            logger.warning(
+                "skipping station after persistent write race",
+                extra={"station": station.id, "product": product},
+            )
 
 
 def overview_from_db(db: Session) -> list[StationOverview]:
@@ -342,7 +414,19 @@ def _touch_log(
         db.add(log)
     else:
         log.fetched_at = now
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost an insert race on the (station, product) primary key: another
+        # session created the log between our lookup and this commit. Update
+        # the winner's row instead.
+        db.rollback()
+        log = db.get(FetchLog, (station_id, product))
+        if log is None:
+            # not the insert race after all — surface the real constraint error
+            raise
+        log.fetched_at = now
+        db.commit()
     return log
 
 

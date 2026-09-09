@@ -4,6 +4,7 @@ import httpx
 import respx
 from httpx import Response
 
+from app import service
 from app.models import FetchLog, Reading
 from tests.conftest import NOAA_URL, water_level_payload
 
@@ -89,12 +90,61 @@ def test_stale_cache_served_when_noaa_is_down(client, db):
 
 
 @respx.mock
+def test_failure_cooldown_serves_stale_without_repaying_retries(client, db):
+    """After a NOAA failure, requests inside the cooldown skip NOAA entirely —
+    an outage must be absorbed by the cache, not amplified by every visitor."""
+    route = respx.get(NOAA_URL)
+    route.side_effect = [Response(200, json=water_level_payload()), Response(500)]
+
+    client.get(READINGS_URL)
+    _age_fetch_log(db, minutes=60)
+    first = client.get(READINGS_URL)  # trips the failure, starts the cooldown
+    second = client.get(READINGS_URL)  # inside the cooldown: no NOAA call
+
+    assert first.json()["source"] == "stale"
+    assert second.json()["source"] == "stale"
+    assert route.call_count == 2, "the cooldown must absorb the second request"
+
+
+@respx.mock
+def test_failure_cooldown_expires_and_noaa_is_retried(client, db):
+    route = respx.get(NOAA_URL)
+    route.side_effect = [
+        Response(200, json=water_level_payload()),
+        Response(500),
+        Response(200, json=water_level_payload()),
+    ]
+
+    client.get(READINGS_URL)
+    _age_fetch_log(db, minutes=60)
+    client.get(READINGS_URL)  # fails, cooldown starts
+    service._last_failure[("9414290", "water_level")] -= 120  # cooldown elapses
+
+    resp = client.get(READINGS_URL)
+
+    assert resp.json()["source"] == "noaa"
+    assert route.call_count == 3
+
+
+@respx.mock
 def test_502_when_noaa_down_and_nothing_cached(client):
     respx.get(NOAA_URL).mock(side_effect=httpx.ConnectError("connection refused"))
 
     resp = client.get(READINGS_URL)
 
     assert resp.status_code == 502
+
+
+@respx.mock
+def test_cooldown_fails_fast_when_nothing_cached(client):
+    """With no cache to fall back on, requests inside the cooldown 502
+    immediately instead of re-paying the NOAA retry cost each time."""
+    route = respx.get(NOAA_URL).mock(side_effect=httpx.ConnectError("connection refused"))
+
+    assert client.get(READINGS_URL).status_code == 502
+    assert client.get(READINGS_URL).status_code == 502
+
+    assert route.call_count == 1, "second request must fail fast without touching NOAA"
 
 
 @respx.mock

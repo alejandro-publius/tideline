@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import {
   fmtDuration,
   fmtLevel,
+  fmtSignedLevel,
   fmtTemp,
   fmtTime,
   latestSurge,
@@ -42,7 +43,6 @@ export default function StatTiles({ points, predicted, product, nowMs, units, fl
     const surge = latestSurge(points)
     const extreme = nextExtreme(predicted, nowMs)
     if (!surge) return []
-    const sign = surge.surge >= 0 ? '+' : '−'
     const floodTile: Tile[] = []
     if (floodMinor != null) {
       const headroom = floodMinor - surge.observed
@@ -65,7 +65,7 @@ export default function StatTiles({ points, predicted, product, nowMs, units, fl
       { label: 'Predicted', value: fmtLevel(surge.predicted, units), sub: 'astronomical tide' },
       {
         label: 'Surge residual',
-        value: `${sign}${fmtLevel(Math.abs(surge.surge), units)}`,
+        value: fmtSignedLevel(surge.surge, units),
         sub: surge.surge >= 0 ? 'above prediction' : 'below prediction',
       },
       extreme
