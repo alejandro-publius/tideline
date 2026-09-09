@@ -147,9 +147,25 @@ def get_series(
 def _store(
     db: Session, station_id: str, product: str, series: list[tuple[datetime, float]]
 ) -> None:
-    """Insert new rows, skipping timestamps already recorded (portable upsert)."""
+    """Insert new rows, skipping timestamps already recorded (portable upsert).
+
+    NOAA has, on occasion, repeated a timestamp within a single response (e.g. a
+    preliminary reading followed by its verified replacement, both still inside
+    the requested window). `(station, product, ts)` is a unique constraint, so
+    two rows for the same timestamp in one payload would otherwise crash the
+    whole insert -- taking every other station in the same sweep down with it.
+    Collapse to one row per timestamp first; the later entry wins, since NOAA
+    orders a series chronologically, so a later duplicate is the more recent
+    (more authoritative) reprocessing of that instant.
+    """
     if not series:
         return
+
+    # Collapse duplicates from the payload itself before touching the database
+    # (see the docstring). Doing it here means the retry below only ever has to
+    # deal with a genuine race between writers, not with a series that could
+    # never have been inserted in the first place.
+    deduped: dict[datetime, float] = dict(series)
 
     def insert_missing() -> list[tuple[datetime, float]]:
         existing = set(
@@ -157,11 +173,11 @@ def _store(
                 select(Reading.ts).where(
                     Reading.station_id == station_id,
                     Reading.product == product,
-                    Reading.ts.in_([ts for ts, _ in series]),
+                    Reading.ts.in_(deduped.keys()),
                 )
             )
         )
-        fresh = [(ts, value) for ts, value in series if ts not in existing]
+        fresh = [(ts, value) for ts, value in deduped.items() if ts not in existing]
         db.add_all(
             Reading(station_id=station_id, product=product, ts=ts, value=value)
             for ts, value in fresh
@@ -172,7 +188,7 @@ def _store(
     # Concurrent sessions (requests and the background sweep) can all find the
     # same pair stale and race this upsert; a loser trips the unique constraint.
     # Each writer fetched at its own `utcnow()`, so the series are *nearly* but
-    # not exactly identical — a re-read converges almost always, yet a third
+    # not exactly identical -- a re-read converges almost always, yet a third
     # writer can conflict again, so retry bounded and re-raise loudly after.
     fresh: list[tuple[datetime, float]] = []
     attempts = 3

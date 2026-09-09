@@ -118,10 +118,13 @@ class NoaaClient:
             # Connect/read timeouts and other transport errors are worth retrying.
             raise _TransientNoaaError(f"NOAA request failed: {exc}") from exc
 
-        if resp.status_code >= 500:
+        if resp.status_code >= 500 or resp.status_code == 429:
+            # 429 is NOAA asking us to back off, not a malformed request — unlike
+            # a real 4xx it resolves on its own, so it gets the same retry-with-
+            # backoff treatment as a 5xx rather than failing immediately.
             raise _TransientNoaaError(f"NOAA returned HTTP {resp.status_code}")
         if resp.status_code >= 400:
-            # A 4xx won't fix itself on retry — surface it immediately.
+            # Any other 4xx won't fix itself on retry — surface it immediately.
             raise NoaaError(f"NOAA returned HTTP {resp.status_code}")
 
         try:
