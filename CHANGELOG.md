@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file, seeded from
 `git log`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- The README said the backend suite is 98 tests; it was 101. Corrected, and a
+  new test now derives the number by collecting the suite in a subprocess and
+  compares it against every docs line that states a pytest count, so the next
+  added test either updates the README or reds CI. Deliberately frozen
+  statements (a changelog line describing a past release) go in that test's
+  `HISTORICAL_COUNTS` with the reason.
+
 ## [0.1.0] - 2026-09-07
 
 First tagged release. Dates below are when each piece of work actually
