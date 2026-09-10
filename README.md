@@ -208,7 +208,7 @@ This populates the database and marks the cache fresh, so every endpoint serves 
 ### Tests
 
 ```bash
-cd backend && pytest -v      # 98 tests (or: make test-backend)
+cd backend && pytest -v      # 102 tests (or: make test-backend)
 cd frontend && npm test      # 36 tests (or: make test-frontend)
 ```
 
