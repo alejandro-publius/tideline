@@ -15,7 +15,7 @@ dependencies = [
     "sqlalchemy==2.0.52",
     "pydantic-settings==2.15.0",
     "httpx==0.28.1",
-    "mcp==1.28.1",  # Model Context Protocol server (app/mcp_server.py)
+    "mcp==2.1.1",  # Model Context Protocol server (app/mcp_server.py)
     "pika==1.4.4",  # RabbitMQ client for the telemetry event path (ADR 0007)
 ]
 
