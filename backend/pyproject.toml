@@ -11,8 +11,8 @@ requires-python = ">=3.11"
 # reproducible for a reviewer and in CI. Bump deliberately.
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn[standard]==0.52.4",
-    "sqlalchemy==2.0.52",
+    "uvicorn[standard]==0.53.0",
+    "sqlalchemy==2.0.54",
     "pydantic-settings==2.15.0",
     "httpx==0.28.1",
     "mcp==1.28.1",  # Model Context Protocol server (app/mcp_server.py)
@@ -24,7 +24,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "respx==0.23.1",
-    "ruff==0.16.6",
+    "ruff==0.16.8",
     "mypy==2.3.1",
 ]
 postgres = [
